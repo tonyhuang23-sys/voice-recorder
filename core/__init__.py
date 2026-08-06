@@ -1,0 +1,1 @@
+"""MeetingAssist core package."""
