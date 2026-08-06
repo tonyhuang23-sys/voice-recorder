@@ -3,14 +3,17 @@
 # NOTE: Qwen3-ASR / Whisper models are NOT bundled. They must be placed
 # in a "models" folder next to the built exe at runtime (see core/config.py).
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
+SPEC_DIR = os.path.abspath(SPECPATH)
+
 a = Analysis(
-    ['app.py'],
-    pathex=[],
+    [os.path.join(SPEC_DIR, 'app.py')],
+    pathex=[SPEC_DIR],
     binaries=[],
     datas=[
-        # sherpa-onnx ships some data files; include any that exist
         ('config.json', '.'),
     ],
     hiddenimports=collect_submodules('sherpa_onnx')

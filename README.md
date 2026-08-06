@@ -76,7 +76,7 @@ MeetingAssist/
 
 ```bash
 pip install pyinstaller
-python -m PyInstaller --noconfirm --clean MeetingAssist.spec
+python -m PyInstaller --noconfirm --clean --distpath dist --workpath build MeetingAssist.spec
 # 产物: dist/MeetingAssist.exe
 # 使用: 把 exe 放到一个空目录,运行时若缺少模型会自动下载
 ```
