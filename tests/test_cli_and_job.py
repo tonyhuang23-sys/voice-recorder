@@ -77,6 +77,7 @@ class CliJobTests(unittest.TestCase):
         self.assertIn("--file", out)
         self.assertIn("--watch", out)
         self.assertIn("--push-lark", out)
+        self.assertIn("--email", out)
 
     def test_cli_requires_source(self):
         with self.assertRaises(SystemExit):
@@ -110,11 +111,19 @@ class CliJobTests(unittest.TestCase):
         import json
 
         cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        env_clear = {
+            "LARK_WEBHOOK_URL": "",
+            "GMAIL_USER": "",
+            "GMAIL_APP_PASSWORD": "",
+            "SMTP_PASSWORD": "",
+            "MEETING_SMTP_PASSWORD": "",
+        }
         with tempfile.TemporaryDirectory() as td:
             wav = os.path.join(td, "in.wav")
             _write_tone_wav(wav)
             with mock.patch("core.job.output.OUTPUT_DIR", td), \
-                 mock.patch("core.output.OUTPUT_DIR", td):
+                 mock.patch("core.output.OUTPUT_DIR", td), \
+                 mock.patch.dict(os.environ, env_clear, clear=False):
                 result = run_meeting_job(
                     cfg,
                     title="单元测试",
@@ -129,9 +138,15 @@ class CliJobTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertTrue(os.path.isfile(os.path.join(result.folder, "audio.wav")))
             self.assertTrue(os.path.isfile(os.path.join(result.folder, "转写记录.txt")))
+            self.assertTrue(os.path.isfile(os.path.join(result.folder, "翻译.txt")))
             self.assertTrue(os.path.isfile(os.path.join(result.folder, "会议摘要.txt")))
+            with open(os.path.join(result.folder, "翻译.txt"), encoding="utf-8") as f:
+                trans = f.read()
+            self.assertTrue(trans.strip())
+            self.assertNotEqual(trans.strip(), "")
             self.assertIn("摘要:", result.summary)
             self.assertFalse(result.lark_pushed)
+            self.assertFalse(result.email_sent)
 
     def test_watch_ready_files(self):
         with tempfile.TemporaryDirectory() as td:

@@ -74,7 +74,11 @@ DEFAULT_CONFIG = {
         "smtp_password": "",
         "use_ssl": True,
         "from_addr": "",
-        "to_addrs": [],
+        # Recipient: config email.to (or to_addrs), else env MEETING_EMAIL_TO.
+        # Never put SMTP passwords / app passwords in git.
+        "to": "gztonyhuang@outlook.com",
+        "to_addrs": ["gztonyhuang@outlook.com"],
+        "max_wav_bytes": 20971520,  # skip attaching wav above ~20MB
     },
     "lark": {
         # webhook_url: leave empty here. Prefer env LARK_WEBHOOK_URL.

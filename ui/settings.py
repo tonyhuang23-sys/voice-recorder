@@ -97,8 +97,9 @@ class SettingsDialog(tk.Toplevel):
         self.em_user = tk.StringVar(value=e["smtp_user"])
         self.em_pwd = tk.StringVar(value=e["smtp_password"])
         self.em_ssl = tk.BooleanVar(value=e["use_ssl"])
-        self.em_from = tk.StringVar(value=e["from_addr"])
-        self.em_to = tk.StringVar(value=", ".join(e["to_addrs"]))
+        self.em_from = tk.StringVar(value=e.get("from_addr") or "")
+        default_to = e.get("to") or ", ".join(e.get("to_addrs") or []) or "gztonyhuang@outlook.com"
+        self.em_to = tk.StringVar(value=default_to)
 
         self._grid(f, 0, "SMTP 服务器", self.em_host)
         self._grid(f, 1, "SMTP 端口", self.em_port, width=10)
@@ -108,8 +109,13 @@ class SettingsDialog(tk.Toplevel):
             row=4, column=0, columnspan=2, sticky="w")
         self._grid(f, 5, "发件人地址", self.em_from)
         self._grid(f, 6, "收件人(逗号分隔)", self.em_to)
-        ttk.Label(f, text="例: 163/QQ 邮箱需开启 SMTP 并填授权码",
-                  foreground="gray").grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            f,
+            text="默认收件人 gztonyhuang@outlook.com。也可用环境变量 MEETING_EMAIL_TO。"
+                 "Gmail: GMAIL_USER + GMAIL_APP_PASSWORD(不要写入 git)。",
+            foreground="gray",
+            wraplength=620,
+        ).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(f, text="测试连接", command=self._test_smtp).grid(
             row=8, column=0, columnspan=2, sticky="w", pady=6)
 
@@ -192,7 +198,11 @@ class SettingsDialog(tk.Toplevel):
         cfg["email"]["smtp_password"] = self.em_pwd.get().strip()
         cfg["email"]["use_ssl"] = bool(self.em_ssl.get())
         cfg["email"]["from_addr"] = self.em_from.get().strip()
-        cfg["email"]["to_addrs"] = [x.strip() for x in self.em_to.get().split(",") if x.strip()]
+        to_list = [x.strip() for x in self.em_to.get().replace(";", ",").split(",") if x.strip()]
+        if not to_list:
+            to_list = ["gztonyhuang@outlook.com"]
+        cfg["email"]["to"] = to_list[0]
+        cfg["email"]["to_addrs"] = to_list
 
         cfg.setdefault("lark", {})
         cfg["lark"]["webhook_url"] = self.lk_url.get().strip()

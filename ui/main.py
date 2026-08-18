@@ -285,33 +285,53 @@ class MeetingApp(tk.Tk):
         txt.config(state="disabled")
         self._last_summary = summ
         self.btn_email.config(state="normal")
-        self.var_status.set("摘要已生成")
-        self._maybe_push_lark(summ)
-        messagebox.showinfo("摘要", "摘要已生成,可在新窗口查看。发送邮件前请先保存。", parent=self)
+        self._persist_four_artifacts()
+        self.var_status.set("摘要已生成,四件套已保存")
+
+        def work():
+            emailed = self._maybe_send_meeting_email(silent=True)
+            self._maybe_push_lark(summ, emailed=emailed)
+
+        threading.Thread(target=work, daemon=True).start()
+        messagebox.showinfo("摘要", "摘要已生成。四件套(WAV/转写/翻译/中文摘要)已写入输出目录。", parent=self)
+
+    def _persist_four_artifacts(self):
+        from core.job import complete_translations, chinese_summary
+
+        folder = self._meeting_folder or output.meeting_folder(self.meeting_title)
+        self._meeting_folder = folder
+        self._last_folder = folder
+        if not self._last_summary:
+            self._last_summary = chinese_summary(
+                self.cfg, self.transcript_lines, self.meeting_title,
+                translator=self.translator,
+            )
+        pairs = complete_translations(
+            self.transcript_lines, self.trans_pairs, self.translator,
+            target_lang=self.cfg.get("translate", {}).get("target_lang", "zh"),
+        )
+        wav = output.audio_path(folder)
+        files = output.save_four_artifacts(
+            folder, self.transcript_lines, pairs, self._last_summary,
+            wav_path=wav if os.path.isfile(wav) else None,
+            sample_rate=int(self.cfg["audio"]["sample_rate"]),
+        )
+        return files
 
     def _save_all(self):
-        folder = self._meeting_folder or output.meeting_folder(self.meeting_title)
-        files = {}
-        files["transcript"] = output.save_transcript(folder, self.transcript_lines)
-        if self.trans_pairs:
-            files["translation"] = output.save_translation(folder, self.trans_pairs)
-        if self._last_summary:
-            files["summary"] = output.save_summary(folder, self._last_summary)
-        elif self.transcript_lines:
-            summ = Summarizer(self.cfg).summarize(self.transcript_lines,
-                                                  title=self.meeting_title)
-            self._last_summary = summ
-            files["summary"] = output.save_summary(folder, summ)
-        self._last_folder = folder
-        self._meeting_folder = folder
+        files = self._persist_four_artifacts()
         if self._last_summary:
             self.btn_email.config(state="normal")
         try:
-            os.startfile(folder)
+            os.startfile(self._last_folder)
         except Exception:
             pass
-        self.var_status.set("已保存到: " + folder)
-        messagebox.showinfo("已保存", f"文件已保存到:\n{folder}\n\n{len(files)} 个文件。", parent=self)
+        self.var_status.set("已保存到: " + self._last_folder)
+        messagebox.showinfo(
+            "已保存",
+            f"四件套已保存到:\n{self._last_folder}\n\n{len(files)} 个文件。",
+            parent=self,
+        )
 
     def _send_email(self):
         sender = EmailSender(self.cfg)
@@ -324,22 +344,20 @@ class MeetingApp(tk.Tk):
         if not self._last_summary:
             messagebox.showinfo("提示", "请先生成摘要", parent=self)
             return
-        folder = self._last_folder or self._meeting_folder
-        attachments = []
-        if folder and os.path.isdir(folder):
-            attachments = output.list_text_files(folder)
+        self._persist_four_artifacts()
         self.var_status.set("正在发送邮件...")
         self.update_idletasks()
+
         def work():
             try:
-                sender.send(
-                    subject=f"[会议摘要] {self.meeting_title}",
-                    body=self._last_summary,
-                    attachments=attachments,
+                sender.send_meeting_package(
+                    self.meeting_title, self._last_summary,
+                    self._last_folder or self._meeting_folder,
                 )
                 self.after(0, lambda: self._mail_done(True, "邮件发送成功"))
             except Exception as e:
                 self.after(0, lambda: self._mail_done(False, str(e)))
+
         threading.Thread(target=work, daemon=True).start()
 
     def _mail_done(self, ok, msg):
@@ -357,14 +375,28 @@ class MeetingApp(tk.Tk):
         self.destroy()
 
 
-    def _maybe_push_lark(self, summ):
+    def _maybe_send_meeting_email(self, silent=False):
+        sender = EmailSender(self.cfg)
+        if not sender.is_configured():
+            return False
+        folder = self._last_folder or self._meeting_folder
+        try:
+            sender.send_meeting_package(self.meeting_title, self._last_summary, folder)
+            return True
+        except Exception as e:
+            logger.warning("auto email failed: %s", e)
+            if not silent:
+                self.var_status.set(f"邮件发送失败: {e}")
+            return False
+
+    def _maybe_push_lark(self, summ, emailed=None):
         pusher = LarkPusher(self.cfg)
         if not pusher.should_push():
             return
 
         def work():
             try:
-                pusher.push_meeting(self.meeting_title, summ)
+                pusher.push_meeting(self.meeting_title, summ, emailed=emailed)
                 self.after(0, lambda: self.var_status.set("摘要已生成,并已推送到飞书"))
             except Exception as e:
                 logger.warning("Lark push failed: %s", e)

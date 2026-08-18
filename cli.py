@@ -1,7 +1,7 @@
 """Headless MeetingAssist CLI (no Tk).
 
 Usage:
-    python cli.py --file meeting.mp4 --title "周会" --target-lang zh --push-lark
+    python cli.py --file meeting.mp4 --title "周会" --target-lang zh --push-lark --email
     python cli.py --url https://www.youtube.com/watch?v=... --title "talk"
     python cli.py --mic --title "live"
     python cli.py --loopback --title "zoom"
@@ -26,7 +26,7 @@ logger = logging.getLogger("cli")
 def build_parser():
     p = argparse.ArgumentParser(
         prog="cli.py",
-        description="MeetingAssist headless pipeline: ASR → translate → summarize → save → optional Lark",
+        description="MeetingAssist headless pipeline: ASR → translate → Chinese summary → four artifacts → Lark/email",
     )
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--file", metavar="PATH",
@@ -43,7 +43,9 @@ def build_parser():
     p.add_argument("--target-lang", default="zh", dest="target_lang",
                    help="translation target language (default: zh)")
     p.add_argument("--push-lark", action="store_true",
-                   help="push text + card to Lark/Feishu after summary")
+                   help="push Chinese summary text/card to Lark (also auto if webhook configured)")
+    p.add_argument("--email", action="store_true",
+                   help="email .txt artifacts + wav to MEETING_EMAIL_TO / email.to (also auto if SMTP configured)")
     p.add_argument("--device", type=int, default=None,
                    help="optional sounddevice input index for --mic / --loopback")
     p.add_argument("--watch-settle", type=float, default=8.0, dest="watch_settle",
@@ -77,6 +79,7 @@ def main(argv=None):
         live=live,
         device_index=args.device,
         push_lark=args.push_lark,
+        send_email=args.email,
         log=emit,
     )
     if not result.ok:
@@ -112,6 +115,7 @@ def _run_watch(cfg, args, emit):
                     target_lang=args.target_lang,
                     file_path=path,
                     push_lark=args.push_lark,
+                    send_email=args.email,
                     log=emit,
                 )
                 mark_seen(seen, path, token)

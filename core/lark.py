@@ -99,8 +99,11 @@ class LarkPusher:
         self._post(payload)
         return True
 
-    def push_meeting(self, title, summary, extra=None):
-        """POST text + interactive card for a finished meeting.
+    def push_meeting(self, title, summary, extra=None, emailed=None):
+        """POST Chinese summary as chat text + a card (no file attachments).
+
+        Custom-bot webhooks cannot reliably attach binaries; chat = summary text.
+        The card notes that the four files were emailed (or not, if email skipped).
 
         Returns True if at least one message was sent. Skips if webhook unset.
         Raises RuntimeError on HTTP / API failure (never includes the URL).
@@ -111,12 +114,26 @@ class LarkPusher:
         title = title or "会议记录"
         summary = summary or "（无摘要）"
         extra = extra or ""
+        if emailed is True:
+            mail_note = (
+                "四个文件（原始 WAV、转写记录.txt、翻译.txt、中文摘要.txt）已通过邮件发送。"
+            )
+        elif emailed is False:
+            mail_note = (
+                "四个文件已保存在本地输出目录；邮件未发送（SMTP 未配置或发送失败）。"
+            )
+        else:
+            mail_note = (
+                "四个文件（原始 WAV、转写记录.txt、翻译.txt、中文摘要.txt）已通过邮件发送。"
+            )
+        # Chat = Chinese summary content (webhook cannot attach files).
         text = f"{title}\n\n{summary}"
+        card_body = summary
         if extra:
-            text = f"{text}\n\n{extra}"
-        card_body = summary if not extra else f"{summary}\n\n{extra}"
+            card_body = f"{card_body}\n\n{extra}"
+        card_body = f"{card_body}\n\n{mail_note}"
         self.push_text(text)
-        self.push_card(f"会议摘要 · {title}", card_body, footer="MeetingAssist 自动推送")
+        self.push_card(f"会议摘要 · {title}", card_body, footer=mail_note)
         logger.info("Lark meeting push ok")
         return True
 

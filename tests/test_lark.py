@@ -50,7 +50,11 @@ class LarkTests(unittest.TestCase):
         kinds = [p.get("msg_type") for p in posts]
         self.assertEqual(kinds, ["text", "interactive"])
         self.assertIn("周会", posts[0]["content"]["text"])
+        self.assertIn("要点一", posts[0]["content"]["text"])
         self.assertEqual(posts[1]["card"]["header"]["title"]["content"], "会议摘要 · 周会")
+        card_body = posts[1]["card"]["elements"][0]["text"]["content"]
+        self.assertIn("要点一", card_body)
+        self.assertIn("已通过邮件发送", card_body)
 
     def test_http_error_hides_webhook(self):
         import urllib.error
