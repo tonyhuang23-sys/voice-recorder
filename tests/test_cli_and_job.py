@@ -78,6 +78,9 @@ class CliJobTests(unittest.TestCase):
         self.assertIn("--watch", out)
         self.assertIn("--push-lark", out)
         self.assertIn("--email", out)
+        self.assertNotIn("→", out)
+        self.assertIn("->", out)
+        out.encode("cp1252")  # Windows console default; must not raise
 
     def test_cli_requires_source(self):
         with self.assertRaises(SystemExit):

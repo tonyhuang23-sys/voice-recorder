@@ -8,11 +8,36 @@ Usage:
     python cli.py --watch DIR --push-lark
 """
 import argparse
+import io
 import logging
 import os
 import sys
 
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+
+def _configure_stdio():
+    """Make stdout/stderr utf-8 so argparse help does not crash on Windows cp1252."""
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+            continue
+        except (AttributeError, OSError, ValueError):
+            pass
+        buf = getattr(stream, "buffer", None)
+        if buf is None:
+            continue
+        try:
+            setattr(sys, name, io.TextIOWrapper(buf, encoding="utf-8", errors="replace"))
+        except Exception:
+            pass
+
+
+_configure_stdio()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -26,7 +51,10 @@ logger = logging.getLogger("cli")
 def build_parser():
     p = argparse.ArgumentParser(
         prog="cli.py",
-        description="MeetingAssist headless pipeline: ASR → translate → Chinese summary → four artifacts → Lark/email",
+        description=(
+            "MeetingAssist headless pipeline: ASR -> translate -> Chinese summary "
+            "-> four artifacts -> Lark/email"
+        ),
     )
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--file", metavar="PATH",
@@ -39,7 +67,8 @@ def build_parser():
                      help="capture the default (or --device) microphone")
     src.add_argument("--watch", metavar="DIR",
                      help="watch a folder for Zoom/Teams/Meet/Lark local recordings")
-    p.add_argument("--title", default="会议记录", help="meeting title (default: 会议记录)")
+    p.add_argument("--title", default="会议记录",
+                   help="meeting title (default: meeting)")
     p.add_argument("--target-lang", default="zh", dest="target_lang",
                    help="translation target language (default: zh)")
     p.add_argument("--push-lark", action="store_true",
@@ -56,6 +85,7 @@ def build_parser():
 
 
 def main(argv=None):
+    _configure_stdio()
     args = build_parser().parse_args(argv)
     from core.config import load_config
     from core.job import run_meeting_job

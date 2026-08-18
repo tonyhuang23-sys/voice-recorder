@@ -57,7 +57,7 @@ class _Collector:
             self.pairs.append(payload)
             dst = (payload or {}).get("dst") or ""
             if dst:
-                self._emit(f"   → {dst}")
+                self._emit(f"   -> {dst}")
         elif kind == "status":
             if payload:
                 text = str(payload)
