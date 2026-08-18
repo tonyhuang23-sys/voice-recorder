@@ -147,11 +147,11 @@ export SMTP_PASSWORD="<app-password>"
 python cli.py --file meeting.wav --email
 ```
 
-信件正文为**中文摘要**。附件始终包含三个 `.txt`(转写 / 翻译 / 中文摘要),以及音频:
+信件正文为**中文摘要**。附件始终包含三个 `.txt`(转写 / 翻译 / 中文摘要)。**不会因为 WAV 太大就静默丢掉音频**:
 
 - `audio.wav` + 三个 txt 合计 ≤ 25MB → 附原始 WAV
-- 超过则 ffmpeg 转 `audio.mp3`(约 80kbps mono)并附上,正文写明「因 WAV 过大已压缩」
-- 若 MP3 仍超过 25MB → 不附音频、不使用网盘链接,正文说明完整 WAV/MP3 在本地输出目录
+- 超过则 ffmpeg 转 `audio.mp3`(先 80kbps、仍超则 64kbps,mono)并附上,正文写明「因 WAV 过大已压缩为 MP3」
+- 仅当压缩后的 MP3 仍超过 25MB 时才不附音频,并在正文明确说明;完整 WAV/MP3 留在本地输出目录(不用网盘链接)
 
 原始 WAV 始终保留在 `output/`。无 SMTP 密码时跳过发送,不中断流水线。
 

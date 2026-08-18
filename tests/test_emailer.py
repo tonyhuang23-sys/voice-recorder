@@ -132,6 +132,32 @@ class EmailerTests(unittest.TestCase):
             self.assertFalse(notes)
             self.assertTrue(os.path.isfile(os.path.join(td, ARTIFACT_WAV)))
 
+    def test_huge_wav_is_not_silently_skipped(self):
+        """Replaces the old 'skip huge wav' behavior: must transcode to MP3."""
+        with tempfile.TemporaryDirectory() as td:
+            save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
+            wav = os.path.join(td, ARTIFACT_WAV)
+            with open(wav, "wb") as f:
+                f.write(b"W" * 200)
+            called = []
+
+            def fake_mp3(src, dst, bitrate="80k"):
+                called.append(bitrate)
+                with open(dst, "wb") as out:
+                    out.write(b"M" * 20)
+                return dst
+
+            paths, notes = collect_meeting_attachments(
+                td, max_attach_bytes=150, transcode_mp3=fake_mp3,
+            )
+            names = [os.path.basename(p) for p in paths]
+            self.assertTrue(called, "ffmpeg/mp3 transcode must run for a large wav")
+            self.assertIn(ARTIFACT_MP3, names)
+            self.assertNotIn(ARTIFACT_WAV, names)
+            self.assertTrue(os.path.isfile(wav))
+            self.assertFalse(any("未随信附上" in n and "mp3" not in n.lower() for n in notes))
+            self.assertTrue(any("压缩" in n for n in notes))
+
     def test_large_wav_transcodes_to_mp3(self):
         with tempfile.TemporaryDirectory() as td:
             save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")

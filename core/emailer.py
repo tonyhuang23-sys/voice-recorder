@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TO = "gztonyhuang@outlook.com"
 GMAIL_ATTACH_LIMIT = 25 * 1024 * 1024
-SPEECH_MP3_BITRATE = "80k"
+SPEECH_MP3_BITRATES = ("80k", "64k")  # try 80k first, then 64k if still over budget
 ENV_TO = "MEETING_EMAIL_TO"
 
 
@@ -168,7 +168,7 @@ def collect_meeting_attachments(folder, max_attach_bytes=GMAIL_ATTACH_LIMIT,
     """Return (paths, notes). Original WAV always stays on disk.
 
     Attachments: three .txt files + WAV if wav+txts fit under Gmail's 25MB
-    budget; otherwise a speech MP3. Never silently drop audio.
+    budget; otherwise a speech MP3 (never silently drop a large WAV).
     """
     from .audio_source import convert_to_speech_mp3
 
@@ -204,30 +204,39 @@ def collect_meeting_attachments(folder, max_attach_bytes=GMAIL_ATTACH_LIMIT,
         return attachments, notes
 
     mp3 = os.path.join(folder, ARTIFACT_MP3)
-    try:
-        encode(wav, mp3, bitrate=SPEECH_MP3_BITRATE)
-    except Exception as e:
-        logger.warning("mp3 transcode failed: %s", e)
-        notes.append(
-            f"原始 WAV 约 {_mb(wav_size):.1f}MB,与文本合计超过 Gmail { _mb(limit):.0f}MB "
-            f"附件上限,且转 MP3 失败({e})。完整 WAV 仍在本地,未静默丢弃: {wav}"
-        )
-        return attachments, notes
+    last_rate = SPEECH_MP3_BITRATES[0]
+    mp3_size = 0
+    encode_error = None
+    for rate in SPEECH_MP3_BITRATES:
+        last_rate = rate
+        try:
+            encode(wav, mp3, bitrate=rate)
+        except Exception as e:
+            encode_error = e
+            logger.warning("mp3 transcode failed (%s): %s", rate, e)
+            continue
+        mp3_size = _file_size(mp3)
+        if mp3_size > 0 and mp3_size + txt_size <= limit:
+            attachments.append(mp3)
+            notes.append(
+                f"原始 WAV 约 {_mb(wav_size):.1f}MB,与文本合计超过 Gmail {_mb(limit):.0f}MB "
+                f"附件上限,已压缩为 audio.mp3({_mb(mp3_size):.1f}MB, {rate} mono) 随信附上。"
+                f"因 WAV 过大,音频以 MP3 发送。完整 WAV 仍保存在本地: {wav}"
+            )
+            return attachments, notes
 
-    mp3_size = _file_size(mp3)
-    if mp3_size > 0 and mp3_size + txt_size <= limit:
-        attachments.append(mp3)
+    if mp3_size <= 0:
+        err = encode_error or "unknown"
         notes.append(
-            f"原始 WAV 约 {_mb(wav_size):.1f}MB,与文本合计超过 Gmail {_mb(limit):.0f}MB "
-            f"附件上限,已压缩为 audio.mp3({_mb(mp3_size):.1f}MB, {SPEECH_MP3_BITRATE} mono) 随信附上。"
-            f"完整 WAV 仍保存在本地输出目录: {wav}"
+            f"原始 WAV 约 {_mb(wav_size):.1f}MB,超过 Gmail {_mb(limit):.0f}MB 附件上限,"
+            f"且转 MP3 失败({err})。未静默丢弃: 完整 WAV 仍在本地 {wav}"
         )
         return attachments, notes
 
     notes.append(
-        f"原始 WAV 约 {_mb(wav_size):.1f}MB,压缩后的 MP3 约 {_mb(mp3_size):.1f}MB,"
-        f"仍超过 Gmail {_mb(limit):.0f}MB 附件上限,未能随信附上音频(未使用网盘链接)。"
-        f"完整 WAV 与 MP3 均保存在本地: {folder}"
+        f"原始 WAV 约 {_mb(wav_size):.1f}MB,已尝试压缩为 MP3({last_rate}, "
+        f"约 {_mb(mp3_size):.1f}MB),仍超过 Gmail {_mb(limit):.0f}MB 附件上限,"
+        f"因此未能把音频放进附件(未使用网盘链接)。完整 WAV 与 MP3 均在本地: {folder}"
     )
     return attachments, notes
 
