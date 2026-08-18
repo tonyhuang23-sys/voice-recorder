@@ -39,18 +39,24 @@ class MeetingPipeline:
     # ---- public API ----
     def start(self):
         self.running = True
+        if self.source and hasattr(self.source, "start"):
+            try:
+                self.source.start()
+            except Exception:
+                self.running = False
+                raise
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def stop(self):
         self.running = False
+        if self.thread:
+            self.thread.join(timeout=120)
         if self.source:
             try:
                 self.source.stop()
             except Exception:
                 pass
-        if self.thread:
-            self.thread.join(timeout=5)
 
     def add_line(self, ts, speaker, text):
         with self._lock:
@@ -65,17 +71,49 @@ class MeetingPipeline:
         with self._lock:
             return list(self.transcript)
 
+    def _source_exhausted(self):
+        src = self.source
+        if src is None:
+            return False
+        flag = getattr(src, "exhausted", False)
+        if callable(flag):
+            try:
+                return bool(flag())
+            except Exception:
+                return False
+        return bool(flag)
+
     # ---- processing loop ----
     def _run(self):
-        while self.running:
-            chunk = self.source.read(timeout=0.5) if self.source else None
-            if chunk is None:
-                continue
-            self._process_chunk(chunk)
-        # flush remaining
-        if len(self._buffer) > self._sr * self._min_seg:
-            self._decode_segment(self._buffer)
-            self._buffer = np.zeros(0, dtype=np.float32)
+        try:
+            while self.running:
+                chunk = self.source.read(timeout=0.5) if self.source else None
+                if chunk is None:
+                    if self._source_exhausted():
+                        break
+                    continue
+                self._process_chunk(chunk)
+            # drain anything still queued after a live stop
+            if self.source:
+                while True:
+                    try:
+                        chunk = self.source.read(timeout=0.05)
+                    except Exception:
+                        break
+                    if chunk is None:
+                        break
+                    self._process_chunk(chunk)
+            # flush remaining
+            if len(self._buffer) > self._sr * self._min_seg:
+                self._decode_segment(self._buffer)
+                self._buffer = np.zeros(0, dtype=np.float32)
+        finally:
+            self.running = False
+            if self.callback:
+                try:
+                    self.callback("done", None)
+                except Exception as e:
+                    logger.warning("callback error: %s", e)
 
     def _process_chunk(self, chunk):
         chunk = np.asarray(chunk, dtype=np.float32)

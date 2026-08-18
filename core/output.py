@@ -37,3 +37,17 @@ def save_summary(folder, summary_text):
     with open(path, "w", encoding="utf-8") as f:
         f.write(summary_text)
     return path
+
+
+def audio_path(folder, name="audio.wav"):
+    return os.path.join(folder, name)
+
+
+def list_text_files(folder):
+    if not folder or not os.path.isdir(folder):
+        return []
+    return [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if f.endswith(".txt")
+    ]

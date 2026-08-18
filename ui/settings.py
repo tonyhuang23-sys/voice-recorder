@@ -21,6 +21,7 @@ class SettingsDialog(tk.Toplevel):
         self._build_translate_tab(nb)
         self._build_summary_tab(nb)
         self._build_email_tab(nb)
+        self._build_lark_tab(nb)
         self._build_asr_tab(nb)
 
         btns = ttk.Frame(self)
@@ -112,6 +113,22 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(f, text="测试连接", command=self._test_smtp).grid(
             row=8, column=0, columnspan=2, sticky="w", pady=6)
 
+    def _build_lark_tab(self, nb):
+        f = ttk.Frame(nb)
+        nb.add(f, text="飞书/Lark")
+        lark = self.cfg.get("lark") or {}
+        self.lk_url = tk.StringVar(value=lark.get("webhook_url") or "")
+        self.lk_on = tk.BooleanVar(value=bool(lark.get("enabled", True)))
+        ttk.Checkbutton(f, text="摘要后自动推送(需配置 Webhook)", variable=self.lk_on).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=3)
+        self._grid(f, 1, "Webhook URL", self.lk_url, show="*")
+        ttk.Label(
+            f,
+            text="优先使用环境变量 LARK_WEBHOOK_URL。Webhook 只保存在本地 config.json,不会入库。",
+            foreground="gray",
+            wraplength=620,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=6)
+
     def _test_smtp(self):
         from core.emailer import EmailSender
         from tkinter import messagebox
@@ -126,7 +143,7 @@ class SettingsDialog(tk.Toplevel):
 
         def work():
             try:
-                EmailSender(e).test_connection()
+                EmailSender(self.cfg).test_connection()
                 self.after(0, lambda: messagebox.showinfo("SMTP", "连接成功", parent=self))
             except Exception as ex:
                 self.after(0, lambda: messagebox.showerror("SMTP", f"连接失败:\n{ex}", parent=self))
@@ -176,6 +193,10 @@ class SettingsDialog(tk.Toplevel):
         cfg["email"]["use_ssl"] = bool(self.em_ssl.get())
         cfg["email"]["from_addr"] = self.em_from.get().strip()
         cfg["email"]["to_addrs"] = [x.strip() for x in self.em_to.get().split(",") if x.strip()]
+
+        cfg.setdefault("lark", {})
+        cfg["lark"]["webhook_url"] = self.lk_url.get().strip()
+        cfg["lark"]["enabled"] = bool(self.lk_on.get())
 
         cfg["asr"]["lang_priority"] = self.asr_pri.get()
         cfg["asr"]["whisper"]["model"] = self.ws_model.get()

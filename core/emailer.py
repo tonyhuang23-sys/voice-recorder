@@ -10,35 +10,60 @@ from email.header import Header
 logger = logging.getLogger(__name__)
 
 
+def _email_cfg(cfg):
+    """Accept either the full app config or the email section itself."""
+    if not isinstance(cfg, dict):
+        return {}
+    inner = cfg.get("email")
+    if isinstance(inner, dict) and ("smtp_host" in inner or "smtp_user" in inner):
+        return inner
+    return cfg
+
+
+def connect_smtp(email_cfg, timeout=30):
+    """Open an SMTP connection.
+
+    Implicit SSL (SMTP_SSL, typically port 465) never calls STARTTLS.
+    Plain SMTP may upgrade with STARTTLS when the server advertises it.
+    """
+    host = email_cfg["smtp_host"]
+    port = int(email_cfg.get("smtp_port", 465))
+    use_ssl = bool(email_cfg.get("use_ssl", True))
+    if use_ssl:
+        return smtplib.SMTP_SSL(host, port, timeout=timeout)
+    server = smtplib.SMTP(host, port, timeout=timeout)
+    server.ehlo()
+    if server.has_extn("starttls"):
+        server.starttls()
+        server.ehlo()
+    return server
+
+
 class EmailSender:
     def __init__(self, cfg):
         self.cfg = cfg
 
     def is_configured(self):
-        e = self.cfg["email"]
+        e = _email_cfg(self.cfg)
         return bool(e.get("smtp_host") and e.get("smtp_user") and e.get("smtp_password"))
 
     def test_connection(self):
         """Verify SMTP server/login without sending mail."""
-        e = self.cfg["email"]
+        e = _email_cfg(self.cfg)
         if not self.is_configured():
             raise RuntimeError("SMTP 未配置")
-        port = int(e.get("smtp_port", 465))
-        use_ssl = bool(e.get("use_ssl", True))
-        if use_ssl:
-            server = smtplib.SMTP_SSL(e["smtp_host"], port, timeout=20)
-        else:
-            server = smtplib.SMTP(e["smtp_host"], port, timeout=20)
-            server.ehlo()
-            server.starttls()
+        server = connect_smtp(e, timeout=20)
         try:
             server.login(e["smtp_user"], e["smtp_password"])
             return True
         finally:
-            server.quit()
+            try:
+                server.quit()
+            except Exception:
+                pass
 
     def send(self, subject, body, to_addrs=None, attachments=None, cc_addrs=None):
-        e = self.cfg["email"]
+        e = _email_cfg(self.cfg)
         to_addrs = to_addrs or e.get("to_addrs") or []
         if not self.is_configured():
             raise RuntimeError("SMTP 未配置,请先在设置中填写 SMTP 信息")
@@ -62,18 +87,14 @@ class EmailSender:
                             filename=("utf-8", "", os.path.basename(path)))
             msg.attach(part)
 
-        port = int(e.get("smtp_port", 465))
-        use_ssl = bool(e.get("use_ssl", True))
-        if use_ssl:
-            server = smtplib.SMTP_SSL(e["smtp_host"], port, timeout=30)
-        else:
-            server = smtplib.SMTP(e["smtp_host"], port, timeout=30)
-            server.ehlo()
-            server.starttls()
+        server = connect_smtp(e, timeout=30)
         try:
             server.login(e["smtp_user"], e["smtp_password"])
             server.sendmail(e["smtp_user"], to_addrs + (cc_addrs or []),
                             msg.as_string())
         finally:
-            server.quit()
+            try:
+                server.quit()
+            except Exception:
+                pass
         return True

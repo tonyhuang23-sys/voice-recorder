@@ -76,6 +76,13 @@ DEFAULT_CONFIG = {
         "from_addr": "",
         "to_addrs": [],
     },
+    "lark": {
+        # webhook_url: leave empty here. Prefer env LARK_WEBHOOK_URL.
+        # If you put a URL in local config.json, that file is gitignored.
+        "webhook_url": "",
+        "enabled": True,
+        "timeout_sec": 15,
+    },
     "ui": {
         "theme": "clam",
     },
