@@ -17,6 +17,7 @@ from email.mime.application import MIMEApplication
 from email.header import Header
 
 from .output import (
+    ARTIFACT_MP3,
     ARTIFACT_SUMMARY,
     ARTIFACT_TRANSCRIPT,
     ARTIFACT_TRANSLATION,
@@ -27,7 +28,8 @@ from .output import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_TO = "gztonyhuang@outlook.com"
-DEFAULT_MAX_WAV = 20 * 1024 * 1024
+GMAIL_ATTACH_LIMIT = 25 * 1024 * 1024
+SPEECH_MP3_BITRATE = "80k"
 ENV_TO = "MEETING_EMAIL_TO"
 
 
@@ -111,9 +113,11 @@ def resolved_email_cfg(cfg):
         use_ssl = bool(e.get("use_ssl", True))
 
     try:
-        max_wav = int(e.get("max_wav_bytes") or DEFAULT_MAX_WAV)
+        max_attach = int(
+            e.get("max_attach_bytes") or e.get("max_wav_bytes") or GMAIL_ATTACH_LIMIT
+        )
     except (TypeError, ValueError):
-        max_wav = DEFAULT_MAX_WAV
+        max_attach = GMAIL_ATTACH_LIMIT
 
     to_addrs = resolve_to_addrs(e)
     return {
@@ -125,7 +129,7 @@ def resolved_email_cfg(cfg):
         "from_addr": from_addr or user,
         "to": to_addrs[0] if to_addrs else DEFAULT_TO,
         "to_addrs": to_addrs,
-        "max_wav_bytes": max_wav,
+        "max_attach_bytes": max_attach,
     }
 
 
@@ -148,37 +152,83 @@ def connect_smtp(email_cfg, timeout=30):
     return server
 
 
-def collect_meeting_attachments(folder, max_wav_bytes=DEFAULT_MAX_WAV):
-    """Return (paths, notes). Text artifacts are always .txt. WAV only if small enough."""
+def _file_size(path):
+    try:
+        return os.path.getsize(path) if path and os.path.isfile(path) else 0
+    except OSError:
+        return 0
+
+
+def _mb(n):
+    return n / (1024 * 1024)
+
+
+def collect_meeting_attachments(folder, max_attach_bytes=GMAIL_ATTACH_LIMIT,
+                                transcode_mp3=None):
+    """Return (paths, notes). Original WAV always stays on disk.
+
+    Attachments: three .txt files + WAV if wav+txts fit under Gmail's 25MB
+    budget; otherwise a speech MP3. Never silently drop audio.
+    """
+    from .audio_source import convert_to_speech_mp3
+
+    encode = transcode_mp3 or convert_to_speech_mp3
+    limit = int(max_attach_bytes or GMAIL_ATTACH_LIMIT)
     attachments = []
     notes = []
-    if folder and os.path.isdir(folder):
-        for name in (ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY):
-            path = os.path.join(folder, name)
-            if os.path.isfile(path):
-                attachments.append(path)
-        extras = [
-            p for p in list_text_files(folder)
-            if os.path.basename(p) not in {
-                ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY,
-            }
-        ]
-        attachments.extend(extras)
-        wav = os.path.join(folder, ARTIFACT_WAV)
-        if os.path.isfile(wav):
-            size = os.path.getsize(wav)
-            if size <= int(max_wav_bytes or DEFAULT_MAX_WAV):
-                attachments.append(wav)
-            else:
-                mb = size / (1024 * 1024)
-                limit = int(max_wav_bytes or DEFAULT_MAX_WAV) / (1024 * 1024)
-                notes.append(
-                    f"原始 WAV 约 {mb:.1f}MB,超过附件上限 {limit:.0f}MB,未随信附上。"
-                    f"请在本地输出目录查看: {wav}"
-                )
-    for path in attachments:
-        if path.lower().endswith((".doc", ".docx", ".pdf")):
-            raise RuntimeError("meeting text artifacts must be .txt")
+    if not folder or not os.path.isdir(folder):
+        notes.append("未找到输出目录,无法附加会议文件。")
+        return attachments, notes
+
+    for name in (ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY):
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            attachments.append(path)
+    extras = [
+        p for p in list_text_files(folder)
+        if os.path.basename(p) not in {
+            ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY,
+        }
+    ]
+    attachments.extend(extras)
+    txt_size = sum(_file_size(p) for p in attachments)
+
+    wav = os.path.join(folder, ARTIFACT_WAV)
+    if not os.path.isfile(wav):
+        notes.append("未找到原始 WAV,邮件未附音频。完整录音应保存在输出目录。")
+        return attachments, notes
+
+    wav_size = _file_size(wav)
+    if wav_size + txt_size <= limit:
+        attachments.append(wav)
+        return attachments, notes
+
+    mp3 = os.path.join(folder, ARTIFACT_MP3)
+    try:
+        encode(wav, mp3, bitrate=SPEECH_MP3_BITRATE)
+    except Exception as e:
+        logger.warning("mp3 transcode failed: %s", e)
+        notes.append(
+            f"原始 WAV 约 {_mb(wav_size):.1f}MB,与文本合计超过 Gmail { _mb(limit):.0f}MB "
+            f"附件上限,且转 MP3 失败({e})。完整 WAV 仍在本地,未静默丢弃: {wav}"
+        )
+        return attachments, notes
+
+    mp3_size = _file_size(mp3)
+    if mp3_size > 0 and mp3_size + txt_size <= limit:
+        attachments.append(mp3)
+        notes.append(
+            f"原始 WAV 约 {_mb(wav_size):.1f}MB,与文本合计超过 Gmail {_mb(limit):.0f}MB "
+            f"附件上限,已压缩为 audio.mp3({_mb(mp3_size):.1f}MB, {SPEECH_MP3_BITRATE} mono) 随信附上。"
+            f"完整 WAV 仍保存在本地输出目录: {wav}"
+        )
+        return attachments, notes
+
+    notes.append(
+        f"原始 WAV 约 {_mb(wav_size):.1f}MB,压缩后的 MP3 约 {_mb(mp3_size):.1f}MB,"
+        f"仍超过 Gmail {_mb(limit):.0f}MB 附件上限,未能随信附上音频(未使用网盘链接)。"
+        f"完整 WAV 与 MP3 均保存在本地: {folder}"
+    )
     return attachments, notes
 
 
@@ -247,14 +297,19 @@ class EmailSender:
         return True
 
     def send_meeting_package(self, title, summary, folder, to_addrs=None):
-        """Email Chinese summary in the body and attach the four artifacts.
+        """Email Chinese summary and attach txts plus WAV or speech MP3.
 
-        Text files are .txt. WAV is attached only when under max_wav_bytes.
+        Original WAV always remains in the output folder. If wav+txts exceed
+        Gmail's 25MB budget, attach a compressed MP3 and explain that in the body.
         """
         e = self.resolved()
         to_addrs = to_addrs or e.get("to_addrs") or [DEFAULT_TO]
         attachments, notes = collect_meeting_attachments(
-            folder, max_wav_bytes=e.get("max_wav_bytes", DEFAULT_MAX_WAV),
+            folder, max_attach_bytes=e.get("max_attach_bytes", GMAIL_ATTACH_LIMIT),
+        )
+        names = [os.path.basename(p) for p in attachments]
+        audio_label = ARTIFACT_WAV if ARTIFACT_WAV in names else (
+            ARTIFACT_MP3 if ARTIFACT_MP3 in names else "（音频见正文说明）"
         )
         body_parts = [
             f"会议标题: {title or '会议记录'}",
@@ -263,13 +318,12 @@ class EmailSender:
             "【中文摘要】",
             summary or "（无摘要）",
             "",
-            "附件: 转写记录.txt / 翻译.txt / 会议摘要.txt"
-            + (" / audio.wav" if any(p.endswith(ARTIFACT_WAV) for p in attachments) else ""),
+            f"附件: {ARTIFACT_TRANSCRIPT} / {ARTIFACT_TRANSLATION} / {ARTIFACT_SUMMARY} / {audio_label}",
         ]
         if notes:
             body_parts.extend(["", *notes])
         if folder:
-            body_parts.extend(["", f"输出目录: {folder}"])
+            body_parts.extend(["", f"输出目录(含完整 WAV): {folder}"])
         self.send(
             subject=f"[会议摘要] {title or '会议记录'}",
             body="\n".join(body_parts),
@@ -278,6 +332,6 @@ class EmailSender:
         )
         return {
             "to": list(to_addrs),
-            "attachments": [os.path.basename(p) for p in attachments],
+            "attachments": names,
             "notes": notes,
         }

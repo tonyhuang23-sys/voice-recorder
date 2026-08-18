@@ -6,6 +6,7 @@ import wave
 from .config import OUTPUT_DIR
 
 ARTIFACT_WAV = "audio.wav"
+ARTIFACT_MP3 = "audio.mp3"
 ARTIFACT_TRANSCRIPT = "转写记录.txt"
 ARTIFACT_TRANSLATION = "翻译.txt"
 ARTIFACT_SUMMARY = "会议摘要.txt"

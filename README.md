@@ -49,7 +49,7 @@ python cli.py --help
    2. 原始转写 `转写记录.txt`
    3. 翻译 `翻译.txt`
    4. 中文摘要 `会议摘要.txt`
-6. **邮件(Gmail/SMTP)**: 将三个 `.txt` 作为附件发出,正文为中文摘要;WAV 在体积合理时一并附上(过大则跳过并在正文说明)。默认收件人 `gztonyhuang@outlook.com`(可用 `email.to` 或环境变量 `MEETING_EMAIL_TO` 覆盖)。
+6. **邮件(Gmail/SMTP)**: 三个 `.txt` 始终作为附件;音频也必须送到。WAV+文本合计未超 Gmail 25MB 则附原始 WAV;否则用 ffmpeg 压成语音 MP3(约 80kbps mono)再附上,正文说明因体积已压缩。完整 WAV **始终**留在输出目录,不会静默丢弃。默认收件人 `gztonyhuang@outlook.com`(可用 `email.to` 或 `MEETING_EMAIL_TO` 覆盖)。
 7. **飞书会话**: 只推送**中文摘要正文**(文本 + 卡片)。自定义机器人 Webhook **不能可靠传附件**,卡片会注明四件套已通过邮件发送。
 
 ## 无界面 CLI
@@ -147,7 +147,13 @@ export SMTP_PASSWORD="<app-password>"
 python cli.py --file meeting.wav --email
 ```
 
-信件正文为**中文摘要**。附件必须是 `.txt`(转写 / 翻译 / 中文摘要);`audio.wav` 小于约 20MB 时一并附上,过大则跳过并在正文写明本地路径。无 SMTP 密码时跳过发送,不中断流水线。
+信件正文为**中文摘要**。附件始终包含三个 `.txt`(转写 / 翻译 / 中文摘要),以及音频:
+
+- `audio.wav` + 三个 txt 合计 ≤ 25MB → 附原始 WAV
+- 超过则 ffmpeg 转 `audio.mp3`(约 80kbps mono)并附上,正文写明「因 WAV 过大已压缩」
+- 若 MP3 仍超过 25MB → 不附音频、不使用网盘链接,正文说明完整 WAV/MP3 在本地输出目录
+
+原始 WAV 始终保留在 `output/`。无 SMTP 密码时跳过发送,不中断流水线。
 
 ## 目录结构
 

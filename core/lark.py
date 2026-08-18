@@ -116,7 +116,7 @@ class LarkPusher:
         extra = extra or ""
         if emailed is True:
             mail_note = (
-                "四个文件（原始 WAV、转写记录.txt、翻译.txt、中文摘要.txt）已通过邮件发送。"
+                "转写记录.txt、翻译.txt、中文摘要.txt 以及音频（WAV 或因体积压缩的 MP3）已通过邮件发送。"
             )
         elif emailed is False:
             mail_note = (
@@ -124,7 +124,7 @@ class LarkPusher:
             )
         else:
             mail_note = (
-                "四个文件（原始 WAV、转写记录.txt、翻译.txt、中文摘要.txt）已通过邮件发送。"
+                "转写记录.txt、翻译.txt、中文摘要.txt 以及音频已通过邮件发送。"
             )
         # Chat = Chinese summary content (webhook cannot attach files).
         text = f"{title}\n\n{summary}"

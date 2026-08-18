@@ -78,7 +78,7 @@ DEFAULT_CONFIG = {
         # Never put SMTP passwords / app passwords in git.
         "to": "gztonyhuang@outlook.com",
         "to_addrs": ["gztonyhuang@outlook.com"],
-        "max_wav_bytes": 20971520,  # skip attaching wav above ~20MB
+        "max_attach_bytes": 26214400,  # Gmail ~25MB; over budget → attach MP3, keep original WAV
     },
     "lark": {
         # webhook_url: leave empty here. Prefer env LARK_WEBHOOK_URL.

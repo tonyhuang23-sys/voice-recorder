@@ -256,6 +256,34 @@ def is_16k_mono_wav(path):
         return False
 
 
+def convert_to_speech_mp3(src, dst, bitrate="80k"):
+    """Transcode audio to speech-friendly mono MP3 (64–96 kbps typical).
+
+    Does not replace or delete the source WAV.
+    """
+    src = os.path.abspath(src)
+    dst = os.path.abspath(dst)
+    os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+    if not os.path.isfile(src):
+        raise RuntimeError(f"audio file not found: {src}")
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpeg not found; cannot compress WAV to MP3")
+    proc = subprocess.run(
+        [
+            ffmpeg_bin(), "-y", "-i", src,
+            "-vn", "-ac", "1", "-ar", "16000",
+            "-c:a", "libmp3lame", "-b:a", str(bitrate),
+            dst,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or not os.path.isfile(dst) or os.path.getsize(dst) == 0:
+        err = (proc.stderr or proc.stdout or "")[-2000:]
+        raise RuntimeError(f"ffmpeg failed to encode speech mp3: {err}")
+    return dst
+
+
 def convert_to_16k_mono(src, dst):
     """Extract/convert any audio or video file to 16 kHz mono PCM wav via ffmpeg."""
     src = os.path.abspath(src)
