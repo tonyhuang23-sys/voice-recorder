@@ -46,24 +46,26 @@ DEFAULT_CONFIG = {
         "device_index": None,  # None = default mic
     },
     "translate": {
-        "mode": "local",  # "local" | "cloud"
-        "local": {"engine": "argos"},  # argos
+        "mode": "cloud",  # cloud (Grok/xAI) preferred; local Argos is fallback
+        "local": {"engine": "argos"},
         "cloud": {
-            "provider": "openai",  # openai | deepl
-            "api_key": "",
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
+            "provider": "xai",  # xai | openai | deepl
+            "api_key": "",  # prefer env XAI_API_KEY; never commit a key
+            "base_url": "https://api.x.ai/v1",
+            "model": "grok-3",
             "deepl_api_key": "",
         },
         "auto": True,  # auto: translate other-language text to primary output lang
         "target_lang": "zh",  # primary display language
     },
     "summary": {
-        "engine": "local",  # local | cloud
+        "mode": "cloud",  # cloud (Grok) preferred; local extractive is fallback
+        "engine": "cloud",  # alias of mode (older settings UI)
         "cloud": {
-            "api_key": "",
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
+            "provider": "xai",
+            "api_key": "",  # prefer env XAI_API_KEY; never commit a key
+            "base_url": "https://api.x.ai/v1",
+            "model": "grok-3",
         },
         "max_lines": 1000,
     },

@@ -61,11 +61,12 @@ class SettingsDialog(tk.Toplevel):
             row=2, column=0, columnspan=2, sticky="w")
 
         ttk.Separator(f).grid(row=3, column=0, columnspan=2, sticky="we", pady=8)
-        ttk.Label(f, text="云端 API 配置(选填):").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text="云端优先 Grok/xAI;无密钥或失败时回退本地 Argos。").grid(
+            row=4, column=0, columnspan=2, sticky="w")
         ttk.Label(f, text="Provider").grid(row=5, column=0, sticky="w")
-        ttk.Combobox(f, textvariable=self.tr_provider, values=["openai", "deepl"],
+        ttk.Combobox(f, textvariable=self.tr_provider, values=["xai", "openai", "deepl"],
                      state="readonly", width=10).grid(row=5, column=1, sticky="w")
-        self._grid(f, 6, "OpenAI API Key", self.tr_api)
+        self._grid(f, 6, "API Key (或环境变量 XAI_API_KEY)", self.tr_api, show="*")
         self._grid(f, 7, "Base URL", self.tr_base)
         self._grid(f, 8, "模型", self.tr_model)
         self._grid(f, 9, "DeepL API Key", self.tr_deepl)
@@ -73,15 +74,16 @@ class SettingsDialog(tk.Toplevel):
     def _build_summary_tab(self, nb):
         f = ttk.Frame(nb)
         nb.add(f, text="摘要")
-        self.sm_engine = tk.StringVar(value=self.cfg["summary"]["engine"])
-        self.sm_api = tk.StringVar(value=self.cfg["summary"]["cloud"]["api_key"])
-        self.sm_base = tk.StringVar(value=self.cfg["summary"]["cloud"]["base_url"])
-        self.sm_model = tk.StringVar(value=self.cfg["summary"]["cloud"]["model"])
+        sm = self.cfg.get("summary") or {}
+        self.sm_engine = tk.StringVar(value=sm.get("mode") or sm.get("engine") or "cloud")
+        self.sm_api = tk.StringVar(value=(sm.get("cloud") or {}).get("api_key") or "")
+        self.sm_base = tk.StringVar(value=(sm.get("cloud") or {}).get("base_url") or "")
+        self.sm_model = tk.StringVar(value=(sm.get("cloud") or {}).get("model") or "")
 
         ttk.Label(f, text="摘要引擎:").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Combobox(f, textvariable=self.sm_engine, values=["local", "cloud"],
+        ttk.Combobox(f, textvariable=self.sm_engine, values=["cloud", "local"],
                      state="readonly", width=10).grid(row=0, column=1, sticky="w")
-        ttk.Label(f, text="(local=本地关键词摘要,cloud=LLM摘要)").grid(
+        ttk.Label(f, text="(cloud=Grok 纪要优先,local=本地抽取回退)").grid(
             row=1, column=0, columnspan=2, sticky="w")
         ttk.Separator(f).grid(row=2, column=0, columnspan=2, sticky="we", pady=8)
         self._grid(f, 3, "LLM API Key", self.sm_api)
@@ -187,6 +189,7 @@ class SettingsDialog(tk.Toplevel):
         cfg["translate"]["cloud"]["model"] = self.tr_model.get().strip()
         cfg["translate"]["cloud"]["deepl_api_key"] = self.tr_deepl.get().strip()
 
+        cfg["summary"]["mode"] = self.sm_engine.get()
         cfg["summary"]["engine"] = self.sm_engine.get()
         cfg["summary"]["cloud"]["api_key"] = self.sm_api.get().strip()
         cfg["summary"]["cloud"]["base_url"] = self.sm_base.get().strip()
