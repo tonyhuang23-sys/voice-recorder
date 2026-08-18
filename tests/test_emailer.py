@@ -122,23 +122,31 @@ class EmailerTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env):
             self.assertTrue(EmailSender({"email": {}}).is_configured())
 
-    def test_small_wav_attached_with_txts(self):
-        with tempfile.TemporaryDirectory() as td:
-            save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
-            paths, notes = collect_meeting_attachments(td)
-            names = [os.path.basename(p) for p in paths]
-            self.assertIn(ARTIFACT_WAV, names)
-            self.assertIn(ARTIFACT_TRANSCRIPT, names)
-            self.assertFalse(notes)
-            self.assertTrue(os.path.isfile(os.path.join(td, ARTIFACT_WAV)))
+    def _fake_mp3(self, size=20):
+        def fake_mp3(src, dst, bitrate="80k"):
+            self.assertTrue(os.path.isfile(src))
+            with open(dst, "wb") as out:
+                out.write(b"M" * size)
+            return dst
+        return fake_mp3
 
-    def test_huge_wav_is_not_silently_skipped(self):
-        """Replaces the old 'skip huge wav' behavior: must transcode to MP3."""
+    def test_small_wav_still_attaches_mp3_not_wav(self):
         with tempfile.TemporaryDirectory() as td:
             save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
             wav = os.path.join(td, ARTIFACT_WAV)
-            with open(wav, "wb") as f:
-                f.write(b"W" * 200)
+            paths, notes = collect_meeting_attachments(
+                td, transcode_mp3=self._fake_mp3(),
+            )
+            names = [os.path.basename(p) for p in paths]
+            self.assertIn(ARTIFACT_MP3, names)
+            self.assertNotIn(ARTIFACT_WAV, names)
+            self.assertIn(ARTIFACT_TRANSCRIPT, names)
+            self.assertTrue(os.path.isfile(wav), "original wav must stay on disk")
+            self.assertTrue(any("audio.mp3" in n for n in notes))
+
+    def test_always_transcodes_even_tiny_wav(self):
+        with tempfile.TemporaryDirectory() as td:
+            save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
             called = []
 
             def fake_mp3(src, dst, bitrate="80k"):
@@ -147,66 +155,35 @@ class EmailerTests(unittest.TestCase):
                     out.write(b"M" * 20)
                 return dst
 
-            paths, notes = collect_meeting_attachments(
-                td, max_attach_bytes=150, transcode_mp3=fake_mp3,
-            )
-            names = [os.path.basename(p) for p in paths]
-            self.assertTrue(called, "ffmpeg/mp3 transcode must run for a large wav")
-            self.assertIn(ARTIFACT_MP3, names)
-            self.assertNotIn(ARTIFACT_WAV, names)
-            self.assertTrue(os.path.isfile(wav))
-            self.assertFalse(any("未随信附上" in n and "mp3" not in n.lower() for n in notes))
-            self.assertTrue(any("压缩" in n for n in notes))
+            collect_meeting_attachments(td, transcode_mp3=fake_mp3)
+            self.assertTrue(called, "every email must transcode wav to mp3")
 
-    def test_large_wav_transcodes_to_mp3(self):
+    def test_mp3_over_limit_refuses_email(self):
         with tempfile.TemporaryDirectory() as td:
             save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
-            wav = os.path.join(td, ARTIFACT_WAV)
-            with open(wav, "wb") as f:
-                f.write(b"W" * 200)
-
-            def fake_mp3(src, dst, bitrate="80k"):
-                self.assertTrue(os.path.isfile(src))
-                with open(dst, "wb") as out:
-                    out.write(b"M" * 20)
-                return dst
-
             paths, notes = collect_meeting_attachments(
-                td, max_attach_bytes=150, transcode_mp3=fake_mp3,
-            )
-            names = [os.path.basename(p) for p in paths]
-            self.assertIn(ARTIFACT_TRANSCRIPT, names)
-            self.assertIn(ARTIFACT_TRANSLATION, names)
-            self.assertIn(ARTIFACT_SUMMARY, names)
-            self.assertIn(ARTIFACT_MP3, names)
-            self.assertNotIn(ARTIFACT_WAV, names)
-            self.assertTrue(os.path.isfile(wav), "original wav must stay on disk")
-            self.assertTrue(any("压缩" in n and "mp3" in n.lower() for n in notes))
-
-    def test_mp3_still_over_limit_is_explained(self):
-        with tempfile.TemporaryDirectory() as td:
-            save_four_artifacts(td, [("00:00", "?", "hi")], [{"src": "hi", "dst": "你好"}], "摘要")
-            wav = os.path.join(td, ARTIFACT_WAV)
-            with open(wav, "wb") as f:
-                f.write(b"W" * 200)
-
-            def huge_mp3(src, dst, bitrate="80k"):
-                with open(dst, "wb") as out:
-                    out.write(b"M" * 200)
-                return dst
-
-            paths, notes = collect_meeting_attachments(
-                td, max_attach_bytes=80, transcode_mp3=huge_mp3,
+                td, max_attach_bytes=80, transcode_mp3=self._fake_mp3(size=200),
             )
             names = [os.path.basename(p) for p in paths]
             self.assertNotIn(ARTIFACT_WAV, names)
             self.assertNotIn(ARTIFACT_MP3, names)
-            self.assertTrue(os.path.isfile(wav))
-            joined = "\n".join(notes)
-            self.assertIn("仍超过", joined)
-            self.assertIn("未使用网盘", joined)
+            self.assertTrue(os.path.isfile(os.path.join(td, ARTIFACT_WAV)))
+            self.assertTrue(any("拒绝发送无音频" in n for n in notes))
+            dummy = type("E", (EmailSender,), {
+                "is_configured": lambda self: True,
+                "resolved": lambda self: {
+                    "to_addrs": ["gztonyhuang@outlook.com"],
+                    "max_attach_bytes": 80,
+                },
+                "send": lambda *a, **k: True,
+            })({})
+            with self.assertRaises(RuntimeError) as ctx:
+                dummy.send_meeting_package(
+                    "t", "s", td, transcode_mp3=self._fake_mp3(size=200),
+                )
+            self.assertIn("拒绝发送无音频", str(ctx.exception))
 
-    def test_send_meeting_package_body_and_attachments(self):
+    def test_send_meeting_package_always_includes_mp3(self):
         sent = {}
 
         class Dummy(EmailSender):
@@ -226,53 +203,17 @@ class EmailerTests(unittest.TestCase):
                 "这是中文摘要",
             )
             Dummy({"email": {"to": "gztonyhuang@outlook.com"}}).send_meeting_package(
-                "周会", "这是中文摘要", td, to_addrs=["gztonyhuang@outlook.com"],
+                "周会", "这是中文摘要", td,
+                to_addrs=["gztonyhuang@outlook.com"],
+                transcode_mp3=self._fake_mp3(),
             )
         self.assertIn("这是中文摘要", sent["body"])
         self.assertIn("周会", sent["subject"])
         self.assertEqual(sent["to"], ["gztonyhuang@outlook.com"])
-        for name in (ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY, ARTIFACT_WAV):
+        for name in (ARTIFACT_TRANSCRIPT, ARTIFACT_TRANSLATION, ARTIFACT_SUMMARY, ARTIFACT_MP3):
             self.assertIn(name, sent["attachments"])
-        self.assertIn("audio.wav", sent["body"])
-
-    def test_send_package_mentions_mp3_compression(self):
-        sent = {}
-
-        class Dummy(EmailSender):
-            def is_configured(self):
-                return True
-
-            def send(self, subject, body, to_addrs=None, attachments=None, cc_addrs=None):
-                sent["body"] = body
-                sent["attachments"] = [os.path.basename(p) for p in attachments or []]
-                return True
-
-            def resolved(self):
-                return {
-                    "to_addrs": ["gztonyhuang@outlook.com"],
-                    "max_attach_bytes": 150,
-                }
-
-        with tempfile.TemporaryDirectory() as td:
-            save_four_artifacts(
-                td, [("00:00", "?", "hello")], [{"src": "hello", "dst": "你好"}],
-                "这是中文摘要",
-            )
-            with open(os.path.join(td, ARTIFACT_WAV), "wb") as f:
-                f.write(b"W" * 200)
-
-            def fake_mp3(src, dst, bitrate="80k"):
-                with open(dst, "wb") as out:
-                    out.write(b"M" * 20)
-                return dst
-
-            with mock.patch("core.audio_source.convert_to_speech_mp3", side_effect=fake_mp3):
-                Dummy({}).send_meeting_package("周会", "这是中文摘要", td)
-
-        self.assertIn(ARTIFACT_MP3, sent["attachments"])
         self.assertNotIn(ARTIFACT_WAV, sent["attachments"])
-        self.assertIn("压缩", sent["body"])
-        self.assertIn("mp3", sent["body"].lower())
+        self.assertIn("MP3", sent["body"])
 
 
 if __name__ == "__main__":

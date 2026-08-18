@@ -74,7 +74,7 @@ def build_parser():
     p.add_argument("--push-lark", action="store_true",
                    help="push Chinese summary text/card to Lark (also auto if webhook configured)")
     p.add_argument("--email", action="store_true",
-                   help="email .txt artifacts + wav to MEETING_EMAIL_TO / email.to (also auto if SMTP configured)")
+                   help="email .txt artifacts + speech mp3 to MEETING_EMAIL_TO / email.to (also auto if SMTP configured)")
     p.add_argument("--device", type=int, default=None,
                    help="optional sounddevice input index for --mic / --loopback")
     p.add_argument("--watch-settle", type=float, default=8.0, dest="watch_settle",
