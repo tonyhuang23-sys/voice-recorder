@@ -46,11 +46,11 @@ DEFAULT_CONFIG = {
         "device_index": None,  # None = default mic
     },
     "translate": {
-        "mode": "cloud",  # cloud (Grok/xAI) preferred; local Argos is fallback
+        "mode": "local",  # CLI default: Argos offline. cloud is optional if a key exists
         "local": {"engine": "argos"},
         "cloud": {
-            "provider": "xai",  # xai | openai | deepl
-            "api_key": "",  # prefer env XAI_API_KEY; never commit a key
+            "provider": "openai",  # optional OpenAI-compatible override (xai | openai | deepl)
+            "api_key": "",  # optional; never required; never commit
             "base_url": "https://api.x.ai/v1",
             "model": "grok-3",
             "deepl_api_key": "",
@@ -59,11 +59,11 @@ DEFAULT_CONFIG = {
         "target_lang": "zh",  # primary display language
     },
     "summary": {
-        "mode": "cloud",  # cloud (Grok) preferred; local extractive is fallback
-        "engine": "cloud",  # alias of mode (older settings UI)
+        "mode": "local",  # CLI default: extractive. cloud is optional if a key exists
+        "engine": "local",
         "cloud": {
-            "provider": "xai",
-            "api_key": "",  # prefer env XAI_API_KEY; never commit a key
+            "provider": "openai",
+            "api_key": "",  # optional; never required; never commit
             "base_url": "https://api.x.ai/v1",
             "model": "grok-3",
         },

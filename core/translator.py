@@ -1,4 +1,4 @@
-"""Translation: Grok/xAI cloud preferred, local Argos fallback."""
+"""Translation: local Argos by default; optional OpenAI-compatible cloud if a key exists."""
 import logging
 import urllib.request
 import json
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class Translator:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.mode = (cfg.get("translate") or {}).get("mode", "cloud")
+        self.mode = (cfg.get("translate") or {}).get("mode", "local")
         self._argos = {}
         self._argos_ready = False
 
@@ -70,7 +70,7 @@ class Translator:
                 temperature=0.2,
             )
         except Exception as e:
-            logger.warning("Grok/cloud translate failed: %s", e)
+            logger.warning("cloud translate failed: %s", e)
             return None
 
     def _deepl(self, text, src, dst, key):
@@ -94,7 +94,7 @@ class Translator:
         if not text or not text.strip():
             return ""
         dst = dst or self.cfg["translate"].get("target_lang", "zh")
-        mode = mode or self.mode or "cloud"
+        mode = mode or self.mode or "local"
         if src == "auto":
             src = "zh" if _looks_like_chinese(text) else "en"
         if src == dst:

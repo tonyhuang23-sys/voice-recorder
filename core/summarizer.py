@@ -1,4 +1,4 @@
-"""Meeting summary: Grok/xAI cloud preferred, local extractive fallback."""
+"""Meeting summary: local extractive by default; optional cloud if a key exists."""
 import logging
 import re
 
@@ -23,7 +23,7 @@ class Summarizer:
 
     def _mode(self, engine=None):
         sm = self.cfg.get("summary") or {}
-        return engine or sm.get("mode") or sm.get("engine") or "cloud"
+        return engine or sm.get("mode") or sm.get("engine") or "local"
 
     def summarize(self, transcript_lines, title="会议记录", engine=None, mode=None):
         """transcript_lines: list of (timestamp, speaker, text)."""
@@ -38,7 +38,7 @@ class Summarizer:
                 try:
                     return self._cloud_summarize(text, title, cloud)
                 except Exception as e:
-                    logger.warning("Grok/cloud summary failed (%s), using local.", e)
+                    logger.warning("cloud summary failed (%s), using local.", e)
             else:
                 logger.info("summary cloud key unset, using local extractive")
 
@@ -106,7 +106,7 @@ class Summarizer:
             "【后续行动】",
             "  （本地规则摘要未能可靠抽取行动项）",
             "",
-            "（本地抽取摘要。配置 XAI_API_KEY 后优先使用 Grok 生成纪要。）",
+            "（本地抽取摘要。Grok 级纪要由助手处理 hearing 时生成,不依赖本机 API key。）",
         ])
         return "\n".join(lines)
 

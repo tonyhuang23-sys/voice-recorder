@@ -61,12 +61,12 @@ class SettingsDialog(tk.Toplevel):
             row=2, column=0, columnspan=2, sticky="w")
 
         ttk.Separator(f).grid(row=3, column=0, columnspan=2, sticky="we", pady=8)
-        ttk.Label(f, text="云端优先 Grok/xAI;无密钥或失败时回退本地 Argos。").grid(
+        ttk.Label(f, text="默认 local(Argos)。Grok 质量由助手完成,不需要本机 Key。cloud 仅在已有密钥时可选。").grid(
             row=4, column=0, columnspan=2, sticky="w")
         ttk.Label(f, text="Provider").grid(row=5, column=0, sticky="w")
-        ttk.Combobox(f, textvariable=self.tr_provider, values=["xai", "openai", "deepl"],
+        ttk.Combobox(f, textvariable=self.tr_provider, values=["openai", "xai", "deepl"],
                      state="readonly", width=10).grid(row=5, column=1, sticky="w")
-        self._grid(f, 6, "API Key (或环境变量 XAI_API_KEY)", self.tr_api, show="*")
+        self._grid(f, 6, "可选 API Key(非必需;已有密钥才填,或环境变量 XAI_API_KEY)", self.tr_api, show="*")
         self._grid(f, 7, "Base URL", self.tr_base)
         self._grid(f, 8, "模型", self.tr_model)
         self._grid(f, 9, "DeepL API Key", self.tr_deepl)
@@ -75,18 +75,18 @@ class SettingsDialog(tk.Toplevel):
         f = ttk.Frame(nb)
         nb.add(f, text="摘要")
         sm = self.cfg.get("summary") or {}
-        self.sm_engine = tk.StringVar(value=sm.get("mode") or sm.get("engine") or "cloud")
+        self.sm_engine = tk.StringVar(value=sm.get("mode") or sm.get("engine") or "local")
         self.sm_api = tk.StringVar(value=(sm.get("cloud") or {}).get("api_key") or "")
         self.sm_base = tk.StringVar(value=(sm.get("cloud") or {}).get("base_url") or "")
         self.sm_model = tk.StringVar(value=(sm.get("cloud") or {}).get("model") or "")
 
         ttk.Label(f, text="摘要引擎:").grid(row=0, column=0, sticky="w", pady=3)
-        ttk.Combobox(f, textvariable=self.sm_engine, values=["cloud", "local"],
+        ttk.Combobox(f, textvariable=self.sm_engine, values=["local", "cloud"],
                      state="readonly", width=10).grid(row=0, column=1, sticky="w")
-        ttk.Label(f, text="(cloud=Grok 纪要优先,local=本地抽取回退)").grid(
+        ttk.Label(f, text="(默认 local=本地抽取。Grok 质量由助手完成,不需要本机 Key。cloud 仅在已有密钥时可选)").grid(
             row=1, column=0, columnspan=2, sticky="w")
         ttk.Separator(f).grid(row=2, column=0, columnspan=2, sticky="we", pady=8)
-        self._grid(f, 3, "LLM API Key", self.sm_api)
+        self._grid(f, 3, "可选 LLM API Key(非必需)", self.sm_api)
         self._grid(f, 4, "Base URL", self.sm_base)
         self._grid(f, 5, "模型", self.sm_model)
 

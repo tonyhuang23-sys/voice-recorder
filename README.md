@@ -42,8 +42,8 @@ python cli.py --help
    - **系统声音(环回)**: 捕获 Windows 正在播放的声音(需系统有 Stereo Mix 或 VB-Cable)。适合接入 Teams/Zoom/Meet/X Spaces 会议。
    - **链接下载**: 粘贴会议链接(X Spaces / YouTube 等),应用用 yt-dlp 下载音频后离线转写。
 2. **转写**: Qwen3-ASR(中文优先)与 Whisper(英文优先)自动路由;可按需在[设置]切换优先级。
-3. **翻译**: **优先 Grok (xAI)** 云端翻译;无 `XAI_API_KEY` 或调用失败时回退本地 Argos。不要把 API key 提交到 git。
-4. **摘要**: **优先 Grok** 生成中文纪要(会议主题 / 关键要点 / 结论与决议 / 后续行动);失败则回退本地抽取摘要。
+3. **翻译**: 本机 CLI 默认离线 **Argos**。Grok 质量译文由助手处理 hearing 时完成,不需要本机 xAI Key。若你**已经有**云端 Key,可把 `translate.mode` 设为 `cloud` 作为可选覆盖。不要把 API key 提交到 git。
+4. **摘要**: 本机 CLI 默认本地 **抽取式**。Grok 质量纪要由助手处理 hearing 时完成;无 Key 时 CLI 仍写出完整 `会议摘要.txt`。云端 OpenAI 兼容接口仅在已有 Key 时可选。
 5. **四件套**: 每次处理完一场会议,输出目录固定写入四个文件(缺一不可):
    1. 原始 WAV(`audio.wav`,提取或现场录制)
    2. 原始转写 `转写记录.txt`
@@ -120,22 +120,20 @@ python cli.py --file meeting.wav --push-lark
 
 未设置变量且 `config.json` 中也无 URL 时会跳过并提示,四件套仍会保存。GUI 在[设置→飞书/Lark]填写 Webhook 后,摘要完成会把**中文摘要**推进会话(文本 + 卡片),并注明四件套已邮件发送。Webhook **不会**附加 WAV/文件。请求有超时;非 2xx 或机器人返回错误码会记日志,不会打印完整 Webhook。
 
-## 翻译与摘要: Grok 优先
+## 翻译与摘要: 本机默认离线,不需要 xAI Key
 
-默认 `translate.mode` 与 `summary.mode` 均为 `cloud`。走 OpenAI 兼容的 xAI Chat Completions:
+**Grok 质量的翻译与摘要由助手在处理一场 hearing 时完成**(用你现有的 Grok 订阅)。本机 `python cli.py` **不调用** xAI API,也**不要**去申请或填写 xAI Key。
 
-- `base_url`: `https://api.x.ai/v1`
-- `model`: 读配置,默认 `grok-3`(不要在代码里写死假密钥)
-- `api_key`: 环境变量 `XAI_API_KEY`,或 gitignored `config.json` 的 `translate.cloud.api_key` / `summary.cloud.api_key`
+无人值守默认:
 
-```bash
-export XAI_API_KEY="<your-xai-key>"
-python cli.py --file meeting.wav --title "周会"
-```
+- `translate.mode` / `summary.mode` = `local`
+- 翻译: 离线 **Argos**
+- 摘要: 本地 **抽取式**
+- 无任何云端 Key 也能完整跑完并写出四个本地文件
 
-无密钥或 Grok 请求失败时,翻译回退 Argos,摘要回退本地抽取。本地小模型只作后备,不在本流程下载 Qwen 权重。
+可选覆盖(仅当你**已经有**密钥时): 把 mode 设为 `cloud`,或设环境变量 `XAI_API_KEY` / 在 gitignored `config.json` 填写 `translate.cloud.api_key` / `summary.cloud.api_key`。此时走 OpenAI 兼容接口(`base_url` 默认 `https://api.x.ai/v1`,模型默认读配置)。没有 Key 时云端路径会被跳过,回退 Argos / 抽取式。
 
-**不要把 API key 提交到 git。** `config.json` 已在 `.gitignore`。
+本地小模型只作后备,不在本流程下载 Qwen 权重。**不要把 API key 提交到 git。** `config.json` 已在 `.gitignore`。
 
 ## 邮件 / Gmail 附件
 
@@ -218,8 +216,8 @@ python -m PyInstaller --noconfirm --clean --distpath dist --workpath build Meeti
 |---|---|
 | ASR 中文 | Qwen3-ASR-0.6B-int8 (sherpa-onnx ≥1.10, ONNX) |
 | ASR 英文 | faster-whisper (CTranslate2, int8) |
-| 翻译 | Grok/xAI (`https://api.x.ai/v1`, 模型见 `translate.cloud.model`) 优先;Argos 回退 |
-| 摘要 | 同一 Grok chat completions;本地抽取为回退 |
+| 翻译 | 本机默认 Argos;Grok 质量由助手完成。云端 OpenAI 兼容接口仅在已有 Key 时可选 |
+| 摘要 | 本机默认抽取式;Grok 质量由助手完成。xAI Key 可选、非必需 |
 | 音频捕获 | sounddevice(麦克风/环回) + ffmpeg(文件/视频) + yt-dlp(链接) |
 | 邮件 | smtplib SMTP/SSL(隐式 SSL 不再套 STARTTLS) + 测试连接 |
 | 飞书/Lark | 自定义机器人 Webhook(文本 + interactive card) |

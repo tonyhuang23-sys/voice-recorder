@@ -1,4 +1,4 @@
-"""OpenAI-compatible Grok/xAI chat completions (no keys hardcoded)."""
+"""Optional OpenAI-compatible chat completions. A key is never required."""
 import json
 import logging
 import os
@@ -15,8 +15,8 @@ DEFAULT_XAI_MODEL = "grok-3"
 def resolve_llm_cloud(cfg, section="translate"):
     """Resolve api_key / base_url / model for translate or summary.
 
-    Key order: env XAI_API_KEY, then config <section>.cloud.api_key.
-    Never invent a key. Empty key means cloud is unavailable.
+    Optional key (never required): env XAI_API_KEY, then config
+    <section>.cloud.api_key. Empty key means cloud is skipped.
     """
     block = {}
     if isinstance(cfg, dict):
