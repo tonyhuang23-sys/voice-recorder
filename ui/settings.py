@@ -21,6 +21,7 @@ class SettingsDialog(tk.Toplevel):
         self._build_translate_tab(nb)
         self._build_summary_tab(nb)
         self._build_email_tab(nb)
+        self._build_lark_tab(nb)
         self._build_asr_tab(nb)
 
         btns = ttk.Frame(self)
@@ -60,11 +61,12 @@ class SettingsDialog(tk.Toplevel):
             row=2, column=0, columnspan=2, sticky="w")
 
         ttk.Separator(f).grid(row=3, column=0, columnspan=2, sticky="we", pady=8)
-        ttk.Label(f, text="云端 API 配置(选填):").grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text="默认 local(Argos)。Grok 质量由助手完成,不需要本机 Key。cloud 仅在已有密钥时可选。").grid(
+            row=4, column=0, columnspan=2, sticky="w")
         ttk.Label(f, text="Provider").grid(row=5, column=0, sticky="w")
-        ttk.Combobox(f, textvariable=self.tr_provider, values=["openai", "deepl"],
+        ttk.Combobox(f, textvariable=self.tr_provider, values=["openai", "xai", "deepl"],
                      state="readonly", width=10).grid(row=5, column=1, sticky="w")
-        self._grid(f, 6, "OpenAI API Key", self.tr_api)
+        self._grid(f, 6, "可选 API Key(非必需;已有密钥才填,或环境变量 XAI_API_KEY)", self.tr_api, show="*")
         self._grid(f, 7, "Base URL", self.tr_base)
         self._grid(f, 8, "模型", self.tr_model)
         self._grid(f, 9, "DeepL API Key", self.tr_deepl)
@@ -72,18 +74,19 @@ class SettingsDialog(tk.Toplevel):
     def _build_summary_tab(self, nb):
         f = ttk.Frame(nb)
         nb.add(f, text="摘要")
-        self.sm_engine = tk.StringVar(value=self.cfg["summary"]["engine"])
-        self.sm_api = tk.StringVar(value=self.cfg["summary"]["cloud"]["api_key"])
-        self.sm_base = tk.StringVar(value=self.cfg["summary"]["cloud"]["base_url"])
-        self.sm_model = tk.StringVar(value=self.cfg["summary"]["cloud"]["model"])
+        sm = self.cfg.get("summary") or {}
+        self.sm_engine = tk.StringVar(value=sm.get("mode") or sm.get("engine") or "local")
+        self.sm_api = tk.StringVar(value=(sm.get("cloud") or {}).get("api_key") or "")
+        self.sm_base = tk.StringVar(value=(sm.get("cloud") or {}).get("base_url") or "")
+        self.sm_model = tk.StringVar(value=(sm.get("cloud") or {}).get("model") or "")
 
         ttk.Label(f, text="摘要引擎:").grid(row=0, column=0, sticky="w", pady=3)
         ttk.Combobox(f, textvariable=self.sm_engine, values=["local", "cloud"],
                      state="readonly", width=10).grid(row=0, column=1, sticky="w")
-        ttk.Label(f, text="(local=本地关键词摘要,cloud=LLM摘要)").grid(
+        ttk.Label(f, text="(默认 local=本地抽取。Grok 质量由助手完成,不需要本机 Key。cloud 仅在已有密钥时可选)").grid(
             row=1, column=0, columnspan=2, sticky="w")
         ttk.Separator(f).grid(row=2, column=0, columnspan=2, sticky="we", pady=8)
-        self._grid(f, 3, "LLM API Key", self.sm_api)
+        self._grid(f, 3, "可选 LLM API Key(非必需)", self.sm_api)
         self._grid(f, 4, "Base URL", self.sm_base)
         self._grid(f, 5, "模型", self.sm_model)
 
@@ -96,8 +99,9 @@ class SettingsDialog(tk.Toplevel):
         self.em_user = tk.StringVar(value=e["smtp_user"])
         self.em_pwd = tk.StringVar(value=e["smtp_password"])
         self.em_ssl = tk.BooleanVar(value=e["use_ssl"])
-        self.em_from = tk.StringVar(value=e["from_addr"])
-        self.em_to = tk.StringVar(value=", ".join(e["to_addrs"]))
+        self.em_from = tk.StringVar(value=e.get("from_addr") or "")
+        default_to = e.get("to") or ", ".join(e.get("to_addrs") or []) or "gztonyhuang@outlook.com"
+        self.em_to = tk.StringVar(value=default_to)
 
         self._grid(f, 0, "SMTP 服务器", self.em_host)
         self._grid(f, 1, "SMTP 端口", self.em_port, width=10)
@@ -107,10 +111,31 @@ class SettingsDialog(tk.Toplevel):
             row=4, column=0, columnspan=2, sticky="w")
         self._grid(f, 5, "发件人地址", self.em_from)
         self._grid(f, 6, "收件人(逗号分隔)", self.em_to)
-        ttk.Label(f, text="例: 163/QQ 邮箱需开启 SMTP 并填授权码",
-                  foreground="gray").grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            f,
+            text="默认收件人 gztonyhuang@outlook.com。也可用环境变量 MEETING_EMAIL_TO。"
+                 "Gmail: GMAIL_USER + GMAIL_APP_PASSWORD(不要写入 git)。",
+            foreground="gray",
+            wraplength=620,
+        ).grid(row=7, column=0, columnspan=2, sticky="w")
         ttk.Button(f, text="测试连接", command=self._test_smtp).grid(
             row=8, column=0, columnspan=2, sticky="w", pady=6)
+
+    def _build_lark_tab(self, nb):
+        f = ttk.Frame(nb)
+        nb.add(f, text="飞书/Lark")
+        lark = self.cfg.get("lark") or {}
+        self.lk_url = tk.StringVar(value=lark.get("webhook_url") or "")
+        self.lk_on = tk.BooleanVar(value=bool(lark.get("enabled", True)))
+        ttk.Checkbutton(f, text="摘要后自动推送(需配置 Webhook)", variable=self.lk_on).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=3)
+        self._grid(f, 1, "Webhook URL", self.lk_url, show="*")
+        ttk.Label(
+            f,
+            text="优先使用环境变量 LARK_WEBHOOK_URL。Webhook 只保存在本地 config.json,不会入库。",
+            foreground="gray",
+            wraplength=620,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=6)
 
     def _test_smtp(self):
         from core.emailer import EmailSender
@@ -126,7 +151,7 @@ class SettingsDialog(tk.Toplevel):
 
         def work():
             try:
-                EmailSender(e).test_connection()
+                EmailSender(self.cfg).test_connection()
                 self.after(0, lambda: messagebox.showinfo("SMTP", "连接成功", parent=self))
             except Exception as ex:
                 self.after(0, lambda: messagebox.showerror("SMTP", f"连接失败:\n{ex}", parent=self))
@@ -164,6 +189,7 @@ class SettingsDialog(tk.Toplevel):
         cfg["translate"]["cloud"]["model"] = self.tr_model.get().strip()
         cfg["translate"]["cloud"]["deepl_api_key"] = self.tr_deepl.get().strip()
 
+        cfg["summary"]["mode"] = self.sm_engine.get()
         cfg["summary"]["engine"] = self.sm_engine.get()
         cfg["summary"]["cloud"]["api_key"] = self.sm_api.get().strip()
         cfg["summary"]["cloud"]["base_url"] = self.sm_base.get().strip()
@@ -175,7 +201,15 @@ class SettingsDialog(tk.Toplevel):
         cfg["email"]["smtp_password"] = self.em_pwd.get().strip()
         cfg["email"]["use_ssl"] = bool(self.em_ssl.get())
         cfg["email"]["from_addr"] = self.em_from.get().strip()
-        cfg["email"]["to_addrs"] = [x.strip() for x in self.em_to.get().split(",") if x.strip()]
+        to_list = [x.strip() for x in self.em_to.get().replace(";", ",").split(",") if x.strip()]
+        if not to_list:
+            to_list = ["gztonyhuang@outlook.com"]
+        cfg["email"]["to"] = to_list[0]
+        cfg["email"]["to_addrs"] = to_list
+
+        cfg.setdefault("lark", {})
+        cfg["lark"]["webhook_url"] = self.lk_url.get().strip()
+        cfg["lark"]["enabled"] = bool(self.lk_on.get())
 
         cfg["asr"]["lang_priority"] = self.asr_pri.get()
         cfg["asr"]["whisper"]["model"] = self.ws_model.get()

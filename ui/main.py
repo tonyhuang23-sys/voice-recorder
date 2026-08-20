@@ -2,18 +2,19 @@
 import logging
 import os
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
 
 from core.config import load_config, save_config, OUTPUT_DIR
 from core.audio_source import (MicrophoneCapture, LoopbackCapture,
+                               TeeSource, FileSource,
                                download_audio_from_link, list_input_devices)
 from core.asr import ASRManager
 from core.translator import Translator
 from core.summarizer import Summarizer
 from core.emailer import EmailSender
 from core.pipeline import MeetingPipeline
+from core.lark import LarkPusher
 from core import output
 from ui.settings import SettingsDialog
 
@@ -34,6 +35,9 @@ class MeetingApp(tk.Tk):
         self.trans_pairs = []       # list of {"src","dst"}
         self.transcript_lines = []  # (ts, speaker, text)
         self.meeting_title = "会议记录"
+        self._meeting_folder = None
+        self._last_folder = None
+        self._last_summary = None
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -164,7 +168,7 @@ class MeetingApp(tk.Tk):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         os.startfile(OUTPUT_DIR)
 
-    def _get_source(self):
+    def _get_source(self, dest_folder=None):
         src = self.var_source.get()
         if src == "麦克风":
             idx = self._selected_dev_index()
@@ -180,13 +184,11 @@ class MeetingApp(tk.Tk):
             url = self.var_link.get().strip()
             if not url:
                 raise RuntimeError("请粘贴会议链接(X Spaces / YouTube 等)")
-            folder = os.path.join(OUTPUT_DIR, "downloads")
+            folder = dest_folder or os.path.join(OUTPUT_DIR, "downloads")
             os.makedirs(folder, exist_ok=True)
             self.var_status.set("正在下载链接音频,请稍候...")
             self.update_idletasks()
-            wav = download_audio_from_link(url,
-                    os.path.join(folder, "meeting_" + time.strftime("%Y%m%d_%H%M%S") + ".wav"))
-            # return a file source (list of samples loaded fully)
+            wav = download_audio_from_link(url, os.path.join(folder, "audio.wav"))
             return FileSource(wav)
         raise RuntimeError("未知音源")
 
@@ -206,12 +208,20 @@ class MeetingApp(tk.Tk):
         self.meeting_title = self.var_title.get().strip() or "会议记录"
         self.transcript_lines = []
         self.trans_pairs = []
+        self._last_summary = None
         self.txt.delete("1.0", "end")
         self._log(f"===== 会议开始: {self.meeting_title} =====")
         self.var_status.set("正在启动...")
         self.update_idletasks()
         try:
-            source = self._get_source()
+            self._meeting_folder = output.meeting_folder(self.meeting_title)
+            source = self._get_source(self._meeting_folder)
+            if not isinstance(source, FileSource):
+                wav_path = output.audio_path(self._meeting_folder)
+                source = TeeSource(
+                    source, wav_path,
+                    sample_rate=int(self.cfg["audio"]["sample_rate"]),
+                )
             self.asr_mgr = ASRManager(self.cfg)
             self.translator = Translator(self.cfg)
             self.pipeline = MeetingPipeline(
@@ -274,25 +284,54 @@ class MeetingApp(tk.Tk):
         txt.insert("1.0", summ)
         txt.config(state="disabled")
         self._last_summary = summ
-        self.var_status.set("摘要已生成")
-        messagebox.showinfo("摘要", "摘要已生成,可在新窗口查看。发送邮件前请先保存。", parent=self)
+        self.btn_email.config(state="normal")
+        self._persist_four_artifacts()
+        self.var_status.set("摘要已生成,四件套已保存")
+
+        def work():
+            emailed = self._maybe_send_meeting_email(silent=True)
+            self._maybe_push_lark(summ, emailed=emailed)
+
+        threading.Thread(target=work, daemon=True).start()
+        messagebox.showinfo("摘要", "摘要已生成。四件套(WAV/转写/翻译/中文摘要)已写入输出目录。", parent=self)
+
+    def _persist_four_artifacts(self):
+        from core.job import complete_translations, chinese_summary
+
+        folder = self._meeting_folder or output.meeting_folder(self.meeting_title)
+        self._meeting_folder = folder
+        self._last_folder = folder
+        if not self._last_summary:
+            self._last_summary = chinese_summary(
+                self.cfg, self.transcript_lines, self.meeting_title,
+                translator=self.translator,
+            )
+        pairs = complete_translations(
+            self.transcript_lines, self.trans_pairs, self.translator,
+            target_lang=self.cfg.get("translate", {}).get("target_lang", "zh"),
+        )
+        wav = output.audio_path(folder)
+        files = output.save_four_artifacts(
+            folder, self.transcript_lines, pairs, self._last_summary,
+            wav_path=wav if os.path.isfile(wav) else None,
+            sample_rate=int(self.cfg["audio"]["sample_rate"]),
+        )
+        return files
 
     def _save_all(self):
-        folder = output.meeting_folder(self.meeting_title)
-        files = {}
-        files["transcript"] = output.save_transcript(folder, self.transcript_lines)
-        if self.trans_pairs:
-            files["translation"] = output.save_translation(folder, self.trans_pairs)
-        if hasattr(self, "_last_summary"):
-            files["summary"] = output.save_summary(folder, self._last_summary)
-        elif self.transcript_lines:
-            summ = Summarizer(self.cfg).summarize(self.transcript_lines,
-                                                  title=self.meeting_title)
-            files["summary"] = output.save_summary(folder, summ)
-        self._last_folder = folder
-        os.startfile(folder)
-        self.var_status.set("已保存到: " + folder)
-        messagebox.showinfo("已保存", f"文件已保存到:\n{folder}\n\n{len(files)} 个文件。", parent=self)
+        files = self._persist_four_artifacts()
+        if self._last_summary:
+            self.btn_email.config(state="normal")
+        try:
+            os.startfile(self._last_folder)
+        except Exception:
+            pass
+        self.var_status.set("已保存到: " + self._last_folder)
+        messagebox.showinfo(
+            "已保存",
+            f"四件套已保存到:\n{self._last_folder}\n\n{len(files)} 个文件。",
+            parent=self,
+        )
 
     def _send_email(self):
         sender = EmailSender(self.cfg)
@@ -302,27 +341,23 @@ class MeetingApp(tk.Tk):
                 parent=self)
             self._open_settings()
             return
-        if not hasattr(self, "_last_summary"):
+        if not self._last_summary:
             messagebox.showinfo("提示", "请先生成摘要", parent=self)
             return
-        folder = getattr(self, "_last_folder", None)
-        attachments = []
-        if folder and os.path.isdir(folder):
-            attachments = [os.path.join(folder, f)
-                           for f in os.listdir(folder)
-                           if f.endswith(".txt")]
+        self._persist_four_artifacts()
         self.var_status.set("正在发送邮件...")
         self.update_idletasks()
+
         def work():
             try:
-                sender.send(
-                    subject=f"[会议摘要] {self.meeting_title}",
-                    body=self._last_summary,
-                    attachments=attachments,
+                sender.send_meeting_package(
+                    self.meeting_title, self._last_summary,
+                    self._last_folder or self._meeting_folder,
                 )
                 self.after(0, lambda: self._mail_done(True, "邮件发送成功"))
             except Exception as e:
                 self.after(0, lambda: self._mail_done(False, str(e)))
+
         threading.Thread(target=work, daemon=True).start()
 
     def _mail_done(self, ok, msg):
@@ -340,37 +375,34 @@ class MeetingApp(tk.Tk):
         self.destroy()
 
 
-class FileSource:
-    """Plays back a fully-loaded audio file as chunks for the pipeline."""
+    def _maybe_send_meeting_email(self, silent=False):
+        sender = EmailSender(self.cfg)
+        if not sender.is_configured():
+            return False
+        folder = self._last_folder or self._meeting_folder
+        try:
+            sender.send_meeting_package(self.meeting_title, self._last_summary, folder)
+            return True
+        except Exception as e:
+            logger.warning("auto email failed: %s", e)
+            if not silent:
+                self.var_status.set(f"邮件发送失败: {e}")
+            return False
 
-    def __init__(self, wav_path, sr=16000):
-        import wave
-        self.wav_path = wav_path
-        self._samples = None
-        self._pos = 0
-        self.sample_rate = sr
-        with wave.open(wav_path, "rb") as w:
-            self.sample_rate = w.getframerate()
-            raw = w.readframes(w.getnframes())
-        import numpy as np
-        self._samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        self._q = []
-        self._fill()
+    def _maybe_push_lark(self, summ, emailed=None):
+        pusher = LarkPusher(self.cfg)
+        if not pusher.should_push():
+            return
 
-    def _fill(self):
-        chunk = int(self.sample_rate * 0.5)
-        i = 0
-        while i < len(self._samples):
-            self._q.append(self._samples[i:i + chunk].copy())
-            i += chunk
+        def work():
+            try:
+                pusher.push_meeting(self.meeting_title, summ, emailed=emailed)
+                self.after(0, lambda: self.var_status.set("摘要已生成,并已推送到飞书"))
+            except Exception as e:
+                logger.warning("Lark push failed: %s", e)
+                self.after(0, lambda: self.var_status.set(f"飞书推送失败: {e}"))
 
-    def read(self, timeout=0.5):
-        if self._q:
-            return self._q.pop(0)
-        return None
-
-    def stop(self):
-        self._q = []
+        threading.Thread(target=work, daemon=True).start()
 
 
 def _find_loopback():

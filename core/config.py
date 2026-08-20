@@ -46,24 +46,26 @@ DEFAULT_CONFIG = {
         "device_index": None,  # None = default mic
     },
     "translate": {
-        "mode": "local",  # "local" | "cloud"
-        "local": {"engine": "argos"},  # argos
+        "mode": "local",  # CLI default: Argos offline. cloud is optional if a key exists
+        "local": {"engine": "argos"},
         "cloud": {
-            "provider": "openai",  # openai | deepl
-            "api_key": "",
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
+            "provider": "openai",  # optional OpenAI-compatible override (xai | openai | deepl)
+            "api_key": "",  # optional; never required; never commit
+            "base_url": "https://api.x.ai/v1",
+            "model": "grok-3",
             "deepl_api_key": "",
         },
         "auto": True,  # auto: translate other-language text to primary output lang
         "target_lang": "zh",  # primary display language
     },
     "summary": {
-        "engine": "local",  # local | cloud
+        "mode": "local",  # CLI default: extractive. cloud is optional if a key exists
+        "engine": "local",
         "cloud": {
-            "api_key": "",
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
+            "provider": "openai",
+            "api_key": "",  # optional; never required; never commit
+            "base_url": "https://api.x.ai/v1",
+            "model": "grok-3",
         },
         "max_lines": 1000,
     },
@@ -74,7 +76,18 @@ DEFAULT_CONFIG = {
         "smtp_password": "",
         "use_ssl": True,
         "from_addr": "",
-        "to_addrs": [],
+        # Recipient: config email.to (or to_addrs), else env MEETING_EMAIL_TO.
+        # Never put SMTP passwords / app passwords in git.
+        "to": "gztonyhuang@outlook.com",
+        "to_addrs": ["gztonyhuang@outlook.com"],
+        "max_attach_bytes": 26214400,  # Gmail ~25MB for txts + speech MP3 (WAV stays local)
+    },
+    "lark": {
+        # webhook_url: leave empty here. Prefer env LARK_WEBHOOK_URL.
+        # If you put a URL in local config.json, that file is gitignored.
+        "webhook_url": "",
+        "enabled": True,
+        "timeout_sec": 15,
     },
     "ui": {
         "theme": "clam",

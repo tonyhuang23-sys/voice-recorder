@@ -1,7 +1,9 @@
-"""Translation engine: local (argos-translate) + cloud (OpenAI-compatible / DeepL)."""
+"""Translation: local Argos by default; optional OpenAI-compatible cloud if a key exists."""
 import logging
 import urllib.request
 import json
+
+from .llm import chat_completions, resolve_llm_cloud
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +11,7 @@ logger = logging.getLogger(__name__)
 class Translator:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.mode = cfg["translate"].get("mode", "local")
+        self.mode = (cfg.get("translate") or {}).get("mode", "local")
         self._argos = {}
         self._argos_ready = False
 
@@ -46,38 +48,30 @@ class Translator:
             logger.warning("local translate failed: %s", e)
             return None
 
-    # ---- cloud ----
+    # ---- cloud (Grok / OpenAI-compatible / DeepL) ----
     def translate_cloud(self, text, src, dst):
-        cloud = self.cfg["translate"]["cloud"]
-        provider = cloud.get("provider", "openai")
-        if provider == "deepl" and cloud.get("deepl_api_key"):
+        cloud = resolve_llm_cloud(self.cfg, "translate")
+        if cloud.get("provider") == "deepl" and cloud.get("deepl_api_key"):
             return self._deepl(text, src, dst, cloud["deepl_api_key"])
-        if cloud.get("api_key"):
-            return self._openai(text, src, dst, cloud)
-        return None
-
-    def _openai(self, text, src, dst, cloud):
-        import urllib.request as u
-
-        body = json.dumps({
-            "model": cloud.get("model", "gpt-4o-mini"),
-            "messages": [
-                {"role": "system",
-                 "content": f"You are a professional translator. Translate the user text from {src} to {dst}. "
-                            f"Output only the translation, no explanations."},
-                {"role": "user", "content": text},
-            ],
-            "temperature": 0.2,
-        }).encode("utf-8")
-        req = u.Request(
-            cloud.get("base_url", "https://api.openai.com/v1") + "/chat/completions",
-            data=body,
-            headers={"Content-Type": "application/json",
-                     "Authorization": f"Bearer {cloud['api_key']}"},
-        )
-        with u.urlopen(req, timeout=60) as r:
-            data = json.loads(r.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+        if not cloud.get("api_key"):
+            return None
+        try:
+            return chat_completions(
+                [
+                    {"role": "system",
+                     "content": (
+                         f"You are a professional translator. Translate the user text "
+                         f"from {src} to {dst}. Output only the translation, no explanations."
+                     )},
+                    {"role": "user", "content": text},
+                ],
+                cloud,
+                timeout=60,
+                temperature=0.2,
+            )
+        except Exception as e:
+            logger.warning("cloud translate failed: %s", e)
+            return None
 
     def _deepl(self, text, src, dst, key):
         params = json.dumps({
@@ -100,7 +94,7 @@ class Translator:
         if not text or not text.strip():
             return ""
         dst = dst or self.cfg["translate"].get("target_lang", "zh")
-        mode = mode or self.mode
+        mode = mode or self.mode or "local"
         if src == "auto":
             src = "zh" if _looks_like_chinese(text) else "en"
         if src == dst:
@@ -110,11 +104,11 @@ class Translator:
             if out:
                 return out
             return self.translate_cloud(text, src, dst) or ""
-        else:
-            out = self.translate_cloud(text, src, dst)
-            if out:
-                return out
-            return self.translate_local(text, src, dst) or ""
+        out = self.translate_cloud(text, src, dst)
+        if out:
+            return out
+        logger.info("translate falling back to local Argos")
+        return self.translate_local(text, src, dst) or ""
 
 
 def _looks_like_chinese(text, ratio=0.15):
