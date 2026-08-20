@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
             "num_threads": 4,
         },
         "whisper": {
-            "model": "tiny",  # tiny/base/small/medium (auto-download on first use)
+            "model": "medium",  # tiny/base/small/medium (auto-download on first use)
             "model_dir": WHISPER_DIR,
             "device": "cpu",
             "compute_type": "int8",
@@ -78,6 +78,10 @@ DEFAULT_CONFIG = {
     },
     "ui": {
         "theme": "clam",
+    },
+    "auc": {
+        "segment_minutes": 15,
+        "temp_wav_max_mb": 100,
     },
 }
 

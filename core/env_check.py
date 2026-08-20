@@ -36,7 +36,7 @@ QWEN3_FILES = [
     "tokenizer/tokenizer_config.json",
 ]
 
-WHISPER_MODEL = "tiny"
+WHISPER_MODEL = "medium"
 WHISPER_MODEL_URLS = {
     "tiny": "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/",
     "base": "https://huggingface.co/Systran/faster-whisper-base/resolve/main/",
