@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
 
 from core.config import load_config, save_config, OUTPUT_DIR
-from core.audio_source import (MicrophoneCapture, LoopbackCapture,
+from core.audio_source import (MicrophoneCapture, LoopbackCapture, FileSource,
                                download_audio_from_link, list_input_devices)
 from core.asr import ASRManager
 from core.translator import Translator
@@ -34,6 +34,7 @@ class MeetingApp(tk.Tk):
         self.trans_pairs = []       # list of {"src","dst"}
         self.transcript_lines = []  # (ts, speaker, text)
         self.meeting_title = "会议记录"
+        self._file_audio_path = None
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -52,8 +53,9 @@ class MeetingApp(tk.Tk):
 
         self.var_source = tk.StringVar(value="麦克风")
         ttk.Label(top, text="音源:").pack(side="left", padx=(16, 2))
-        ttk.Combobox(top, textvariable=self.var_source, width=14,
-                     values=["麦克风", "系统声音(环回)", "链接下载"]).pack(side="left")
+        ttk.Combobox(top, textvariable=self.var_source, width=16,
+                     values=["麦克风", "系统声音(环回)", "链接下载", "本地文件"]).pack(side="left")
+        ttk.Button(top, text="选择文件", command=self._pick_file).pack(side="left", padx=4)
 
         self.var_link = tk.StringVar()
         ttk.Entry(top, textvariable=self.var_link, width=34).pack(side="left", padx=6)
@@ -86,7 +88,8 @@ class MeetingApp(tk.Tk):
                                     command=self._send_email, state="disabled")
         self.btn_email.pack(side="left", padx=6)
 
-        self.var_status = tk.StringVar(value="就绪 — 请选择音源后点击[开始接听]")
+        self.var_status = tk.StringVar(
+            value="就绪 — 可麦克风接听,或选择[本地文件]转写 m4a/wav 并在同目录生成摘要")
         ttk.Label(self, textvariable=self.var_status, foreground="#0070c0",
                   padding=(10, 2)).pack(fill="x")
 
@@ -157,6 +160,22 @@ class MeetingApp(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _pick_file(self):
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="选择录音文件",
+            filetypes=[
+                ("音频", "*.m4a *.wav *.mp3 *.flac *.ogg *.aac"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if path:
+            self.var_source.set("本地文件")
+            self.var_link.set(path)
+            stem = os.path.splitext(os.path.basename(path))[0]
+            if self.var_title.get() in ("", "会议记录"):
+                self.var_title.set(stem)
+
     def _open_settings(self):
         SettingsDialog(self, self.cfg, on_save=lambda c: setattr(self, "cfg", c))
 
@@ -186,8 +205,13 @@ class MeetingApp(tk.Tk):
             self.update_idletasks()
             wav = download_audio_from_link(url,
                     os.path.join(folder, "meeting_" + time.strftime("%Y%m%d_%H%M%S") + ".wav"))
-            # return a file source (list of samples loaded fully)
             return FileSource(wav)
+        if src == "本地文件":
+            path = self.var_link.get().strip()
+            if not path or not os.path.isfile(path):
+                raise RuntimeError("请选择本地音频文件 (m4a/wav/mp3)")
+            self._file_audio_path = path
+            return FileSource(path, sample_rate=int(self.cfg["audio"]["sample_rate"]))
         raise RuntimeError("未知音源")
 
     def _selected_dev_index(self):
@@ -203,9 +227,13 @@ class MeetingApp(tk.Tk):
     def _start(self):
         if self.pipeline and self.pipeline.running:
             return
+        if self.var_source.get() == "本地文件":
+            self._start_file_job()
+            return
         self.meeting_title = self.var_title.get().strip() or "会议记录"
         self.transcript_lines = []
         self.trans_pairs = []
+        self._file_audio_path = None
         self.txt.delete("1.0", "end")
         self._log(f"===== 会议开始: {self.meeting_title} =====")
         self.var_status.set("正在启动...")
@@ -225,6 +253,73 @@ class MeetingApp(tk.Tk):
             messagebox.showerror("启动失败", str(e), parent=self)
             self.var_status.set("启动失败: " + str(e))
 
+    def _start_file_job(self):
+        path = self.var_link.get().strip()
+        if not path or not os.path.isfile(path):
+            path = filedialog.askopenfilename(
+                parent=self,
+                title="选择录音文件",
+                filetypes=[("音频", "*.m4a *.wav *.mp3 *.flac *.ogg *.aac"),
+                           ("所有文件", "*.*")],
+            )
+            if path:
+                self.var_link.set(path)
+        if not path or not os.path.isfile(path):
+            messagebox.showerror("启动失败", "请选择本地音频文件 (m4a/wav/mp3)", parent=self)
+            return
+        self._file_audio_path = path
+        self.meeting_title = self.var_title.get().strip() or os.path.splitext(
+            os.path.basename(path))[0]
+        self.var_title.set(self.meeting_title)
+        self.transcript_lines = []
+        self.trans_pairs = []
+        self.txt.delete("1.0", "end")
+        self._log(f"===== 本地文件转写: {self.meeting_title} =====")
+        self._log(path)
+        self.btn_start.config(state="disabled")
+        self.btn_stop.config(state="disabled")
+        self.var_status.set("正在转写本地文件...")
+
+        def work():
+            from core.file_job import process_audio_file
+
+            def on_line(payload):
+                self.after(0, lambda p=payload: self._ui_pipeline("line", p))
+
+            def on_status(msg):
+                self.after(0, lambda m=msg: self.var_status.set(m))
+
+            try:
+                result = process_audio_file(
+                    path, self.cfg, title=self.meeting_title,
+                    on_line=on_line, on_status=on_status)
+                self._last_summary = result["summary_text"]
+                self._last_folder = result["folder"]
+
+                def done():
+                    self.transcript_lines = result["lines"]
+                    self.btn_start.config(state="normal")
+                    self.btn_save.config(state="normal")
+                    self._log("===== 转写完成,摘要已写入音频同目录 =====")
+                    self._log(result["transcript"])
+                    self._log(result["summary"])
+                    self.var_status.set("已保存到: " + result["folder"])
+                    messagebox.showinfo(
+                        "完成",
+                        f"转写与摘要已写入:\n{result['folder']}",
+                        parent=self)
+                self.after(0, done)
+            except Exception as e:
+                logger.exception("file job failed")
+                self.after(0, lambda err=e: self._file_job_failed(err))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _file_job_failed(self, err):
+        self.btn_start.config(state="normal")
+        self.var_status.set("转写失败: " + str(err))
+        messagebox.showerror("转写失败", str(err), parent=self)
+
     def _on_pipeline(self, kind, payload):
         self.after(0, lambda: self._ui_pipeline(kind, payload))
 
@@ -241,6 +336,10 @@ class MeetingApp(tk.Tk):
                 self.var_status.set(payload)
             else:
                 self.var_status.set("正在接听...")
+        elif kind == "done":
+            self._stop()
+            self.var_status.set(
+                "文件转写完成 — 共 %d 句。可生成摘要或保存。" % len(self.transcript_lines))
 
     def _stop(self):
         if self.pipeline:
@@ -278,17 +377,28 @@ class MeetingApp(tk.Tk):
         messagebox.showinfo("摘要", "摘要已生成,可在新窗口查看。发送邮件前请先保存。", parent=self)
 
     def _save_all(self):
-        folder = output.meeting_folder(self.meeting_title)
+        if self._file_audio_path:
+            folder = os.path.dirname(os.path.abspath(self._file_audio_path))
+            os.makedirs(folder, exist_ok=True)
+            stem = "".join(
+                c if c not in '\\/:*?"<>|' else "_"
+                for c in (self.meeting_title or "会议记录"))
+            t_name, s_name = f"{stem}_转写记录.txt", f"{stem}_会议摘要.txt"
+        else:
+            folder = output.meeting_folder(self.meeting_title)
+            t_name, s_name = "转写记录.txt", "会议摘要.txt"
         files = {}
-        files["transcript"] = output.save_transcript(folder, self.transcript_lines)
+        files["transcript"] = output.save_transcript(
+            folder, self.transcript_lines, filename=t_name)
         if self.trans_pairs:
             files["translation"] = output.save_translation(folder, self.trans_pairs)
         if hasattr(self, "_last_summary"):
-            files["summary"] = output.save_summary(folder, self._last_summary)
+            files["summary"] = output.save_summary(
+                folder, self._last_summary, filename=s_name)
         elif self.transcript_lines:
             summ = Summarizer(self.cfg).summarize(self.transcript_lines,
                                                   title=self.meeting_title)
-            files["summary"] = output.save_summary(folder, summ)
+            files["summary"] = output.save_summary(folder, summ, filename=s_name)
         self._last_folder = folder
         os.startfile(folder)
         self.var_status.set("已保存到: " + folder)
@@ -338,39 +448,6 @@ class MeetingApp(tk.Tk):
             self.pipeline.stop()
         save_config(self.cfg)
         self.destroy()
-
-
-class FileSource:
-    """Plays back a fully-loaded audio file as chunks for the pipeline."""
-
-    def __init__(self, wav_path, sr=16000):
-        import wave
-        self.wav_path = wav_path
-        self._samples = None
-        self._pos = 0
-        self.sample_rate = sr
-        with wave.open(wav_path, "rb") as w:
-            self.sample_rate = w.getframerate()
-            raw = w.readframes(w.getnframes())
-        import numpy as np
-        self._samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        self._q = []
-        self._fill()
-
-    def _fill(self):
-        chunk = int(self.sample_rate * 0.5)
-        i = 0
-        while i < len(self._samples):
-            self._q.append(self._samples[i:i + chunk].copy())
-            i += chunk
-
-    def read(self, timeout=0.5):
-        if self._q:
-            return self._q.pop(0)
-        return None
-
-    def stop(self):
-        self._q = []
 
 
 def _find_loopback():

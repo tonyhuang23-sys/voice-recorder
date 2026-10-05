@@ -1,6 +1,6 @@
 # MeetingAssist 会议助手
 
-本地运行的会议语音助手(Tkinter 桌面应用):一键接听麦克风、捕获系统声音、或粘贴会议链接下载音频,自动完成**语音转写(Qwen3-ASR 中文优先 / Whisper 英文优先)**、**翻译(本地离线 / 云端 API)**、**会议摘要**并通过 **SMTP 发送邮件**。
+本地运行的会议语音助手(Tkinter 桌面应用):一键接听麦克风、捕获系统声音、粘贴会议链接下载音频,或打开本地 m4a/wav,自动完成**语音转写(Qwen3-ASR 中文优先 / Whisper 英文优先)**、**翻译(本地离线 / 云端 API)**、**会议摘要**并通过 **SMTP 发送邮件**。
 
 所有推理均在本地运行,音频不上传。
 
@@ -38,11 +38,22 @@ python app.py
    - **麦克风**: 点击[开始接听]即可实时转写。
    - **系统声音(环回)**: 捕获 Windows 正在播放的声音(需系统有 Stereo Mix 或 VB-Cable)。适合接入 Teams/Zoom/Meet/X Spaces 会议。
    - **链接下载**: 粘贴会议链接(X Spaces / YouTube 等),应用用 yt-dlp 下载音频后离线转写。
+   - **本地文件**: 点击[选择文件]打开 m4a/wav/mp3,转写完成后**在音频同目录**写入 `{文件名}_转写记录.txt` 与 `{文件名}_summary.md`。
 2. **转写**: Qwen3-ASR(中文优先)与 Whisper(英文优先)自动路由;可按需在[设置]切换优先级。
 3. **翻译**: 默认本地 argos-translate 离线翻译;可在[设置→翻译]切换到云端 API(OpenAI/DeepL)。
-4. **摘要**: [生成摘要] → 本地规则摘要或云端 LLM 摘要。
-5. **保存**: 转写/翻译/摘要存到 `output/日期_标题/`。
+4. **摘要**: [生成摘要] → 本地规则摘要或云端 LLM 摘要。本地文件模式会在转写结束后自动生成。
+5. **保存**: 实时会议存到 `output/日期_标题/`;本地文件默认写回录音所在文件夹。
 6. **邮件**: [设置→邮件] 配置 SMTP(可用[测试连接]验证服务器/账号/授权码)后,[发送摘要邮件]可将摘要和附件发到指定邮箱。
+
+### 命令行转写本地录音
+
+不打开窗口,直接把转写和摘要写到录音所在文件夹:
+
+```bat
+python app.py --file "C:\Users\ht_34\OneDrive\家庭共享\创业\WNT CA\CFM56-航改燃\合作伙伴\涛涛车业\2026年10月05日 12点31分.m4a"
+```
+
+或双击 `transcribe_file.cmd` 后把 m4a 拖到窗口上。需要本机已安装 Python 依赖、ffmpeg,以及 Qwen3-ASR / Whisper 模型。
 
 ## 目录结构
 
@@ -55,13 +66,15 @@ MeetingAssist/
 ├── core/
 │   ├── config.py          # 配置加载/保存(兼容打包后的路径)
 │   ├── asr.py             # Qwen3-ASR + faster-whisper 双引擎
-│   ├── audio_source.py    # 麦克风 / 环回 / 链接下载
+│   ├── audio_source.py    # 麦克风 / 环回 / 链接下载 / 本地文件
 │   ├── translator.py      # argos 离线 + 云端翻译
 │   ├── summarizer.py      # 摘要(local/cloud)
 │   ├── emailer.py         # SMTP 发送 + 测试连接
 │   ├── env_check.py       # 环境自检 & 依赖/模型自动下载
 │   ├── pipeline.py        # 实时分段→转写→翻译流水线
+│   ├── file_job.py        # 本地音频转写并写回同目录摘要
 │   └── output.py          # 文件保存
+├── transcribe_file.cmd    # Windows: 拖放 m4a 生成摘要
 ├── ui/
 │   ├── main.py            # 主窗口(含环境检查入口)
 │   └── settings.py        # 设置对话框(SMTP 测试连接)

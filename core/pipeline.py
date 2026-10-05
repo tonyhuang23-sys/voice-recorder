@@ -70,12 +70,20 @@ class MeetingPipeline:
         while self.running:
             chunk = self.source.read(timeout=0.5) if self.source else None
             if chunk is None:
+                if getattr(self.source, "eof", False):
+                    break
                 continue
             self._process_chunk(chunk)
         # flush remaining
         if len(self._buffer) > self._sr * self._min_seg:
             self._decode_segment(self._buffer)
             self._buffer = np.zeros(0, dtype=np.float32)
+        self.running = False
+        if self.callback:
+            try:
+                self.callback("done", None)
+            except Exception as e:
+                logger.warning("callback error: %s", e)
 
     def _process_chunk(self, chunk):
         chunk = np.asarray(chunk, dtype=np.float32)
